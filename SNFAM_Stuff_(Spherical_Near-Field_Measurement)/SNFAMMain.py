@@ -13,6 +13,7 @@ import SNFAMFunctions
 from QPlotter import plotQs
 import plotCSTData
 import statsmodels.api as sm
+from ParaviewVisualization import ExportDataForParaview
 
 lowess = sm.nonparametric.lowess
 eps = 1e-20 ## to avoid singularities
@@ -55,70 +56,73 @@ class SNFData():
                     
             dats[:,2:5] = np.round(np.real(dats[:,2:5]), 3) ## round and real all angles before continuing
                     
-            #self.plotContoursPreProcessing(dats, pol=0) ### this line makes a contour plot of the raw data before any processing
-            #self.plotContoursPreProcessing(dats, pol=1) ### this line makes a contour plot of the raw data before any processing
-            self.plotContoursPreProcessing(dats, pol=1) ### this line makes a contour plot of the raw data before any processing
-             
-            ########### aligning phi angles - done at each theta angle
-            # first manually find phi adjustments at different theta angles where side lobes/zero angles allow easy alignment (phiAdjust list)
-            # then interpolate, smooth, and apply to each theta angle (below), for each probe pol
-            plt.title('Phi Adjustments by Theta Angle')
-            plt.xlabel('Theta [degrees]')
-            plt.ylabel('Phi [degrees]')
-            uniquethetas = np.sort(np.real(np.unique(dats[:,3])))
-            smoothingFrac = 1/8 ## more for more smoothness
-            ## pp0
-            plt.plot(phiAdjust[0][0], phiAdjust[0][1], label='pp=0', linestyle = '--')
-            y_makimapp0 = scipy.interpolate.Akima1DInterpolator(phiAdjust[0][0], phiAdjust[0][1], method = 'makima') ## ultimate values to adjust
-            adjusterpp0 = lowess(y_makimapp0(uniquethetas), uniquethetas, frac = smoothingFrac, return_sorted = False) ## smoothing
-            plt.plot(uniquethetas, adjusterpp0, label='pp=0 Interpolation', linewidth = 1.9)
-            roundadjustpp0 = np.round(adjusterpp0*1/0.8)*0.8/1
-            plt.plot(uniquethetas, roundadjustpp0, label='pp=0 Interpolation, rounded')
-            ## pp90
-            plt.plot(phiAdjust[1][0], phiAdjust[1][1], label='pp=90', linestyle = '--')
-            y_makimapp90 = scipy.interpolate.Akima1DInterpolator(phiAdjust[1][0], phiAdjust[1][1], method = 'makima') ## ultimate values to adjust
-            adjusterpp90 = lowess(y_makimapp90(uniquethetas), uniquethetas, frac = smoothingFrac, return_sorted = False)
-            plt.plot(uniquethetas, adjusterpp90, label='pp=90 Interpolation', linewidth = 1.9)
-            roundadjustpp90 = np.round(adjusterpp90*1/0.8)*0.8/1
-            plt.plot(uniquethetas, roundadjustpp90, label='pp=90 Interpolation, rounded')
-            
-            ## then plot it
-            plt.legend()
-            plt.tight_layout()
-            plt.show()
-            ### now adjust phi angles
-            thetas = np.real(dats[:,3])
-            pps = np.real(dats[:,2])
-            Nfs = int((np.shape(dats)[1]-5)/2) ## number of freq pts
-            
-            for i in range(len(uniquethetas)): ## for each theta angle, adjust the phi values
-                angle = uniquethetas[i]
-                atangle = np.isclose(thetas, angle)
-                idxpp0 = np.isclose(pps, 0) & atangle
-                idxpp90 = np.isclose(pps, 90) & atangle
+            self.plotContoursPreProcessing(dats, pol=0) ### this line makes a contour plot of the raw data before any processing
+                 
+            if(len(phiAdjust) > 0): ## try this adjustment
+                #self.plotContoursPreProcessing(dats, pol=0) ### this line makes a contour plot of the raw data before any processing
+                #self.plotContoursPreProcessing(dats, pol=1) ### this line makes a contour plot of the raw data before any processing
+                self.plotContoursPreProcessing(dats, pol=1) ### this line makes a contour plot of the raw data before any processing
+                 
+                ########### aligning phi angles - done at each theta angle
+                # first manually find phi adjustments at different theta angles where side lobes/zero angles allow easy alignment (phiAdjust list)
+                # then interpolate, smooth, and apply to each theta angle (below), for each probe pol
+                plt.title('Phi Adjustments by Theta Angle')
+                plt.xlabel('Theta [degrees]')
+                plt.ylabel('Phi [degrees]')
+                uniquethetas = np.sort(np.real(np.unique(dats[:,3])))
+                smoothingFrac = 1/8 ## more for more smoothness
+                ## pp0
+                plt.plot(phiAdjust[0][0], phiAdjust[0][1], label='pp=0', linestyle = '--')
+                y_makimapp0 = scipy.interpolate.Akima1DInterpolator(phiAdjust[0][0], phiAdjust[0][1], method = 'makima') ## ultimate values to adjust
+                adjusterpp0 = lowess(y_makimapp0(uniquethetas), uniquethetas, frac = smoothingFrac, return_sorted = False) ## smoothing
+                plt.plot(uniquethetas, adjusterpp0, label='pp=0 Interpolation', linewidth = 1.9)
+                roundadjustpp0 = np.round(adjusterpp0*1/0.8)*0.8/1
+                plt.plot(uniquethetas, roundadjustpp0, label='pp=0 Interpolation, rounded')
+                ## pp90
+                plt.plot(phiAdjust[1][0], phiAdjust[1][1], label='pp=90', linestyle = '--')
+                y_makimapp90 = scipy.interpolate.Akima1DInterpolator(phiAdjust[1][0], phiAdjust[1][1], method = 'makima') ## ultimate values to adjust
+                adjusterpp90 = lowess(y_makimapp90(uniquethetas), uniquethetas, frac = smoothingFrac, return_sorted = False)
+                plt.plot(uniquethetas, adjusterpp90, label='pp=90 Interpolation', linewidth = 1.9)
+                roundadjustpp90 = np.round(adjusterpp90*1/0.8)*0.8/1
+                plt.plot(uniquethetas, roundadjustpp90, label='pp=90 Interpolation, rounded')
                 
-                #===============================================================
-                # ## if I just increase to the nearest rounded angle (no interpolation): (this is bugged currently)
-                # dats[:,4][idxpp0] = dats[:,4][idxpp0] + roundadjustpp0[i] ## pp0
-                # dats[:,4][idxpp90] = dats[:,4][idxpp90] + roundadjustpp90[i] ## pp90
-                #===============================================================
+                ## then plot it
+                plt.legend()
+                plt.tight_layout()
+                plt.show()
+                ### now adjust phi angles
+                thetas = np.real(dats[:,3])
+                pps = np.real(dats[:,2])
+                Nfs = int((np.shape(dats)[1]-5)/2) ## number of freq pts
                 
-                ## if I instead set the S21-data to its interpolated equivalent at the phi-adjusted angles: (need to cut out values where no interpolation is possible)
-                for j in range(NFs): ## adjust S21 for each frequency measured
-                    Sspp0 = dats[idxpp0, 6+2*j] ## the S21 at frequency j, for this theta angle and probe polarization
-                    phispp0 = dats[idxpp0,4] ## the phi values
-                    phiAdj = adjusterpp0[i] ## how much to adjust phi values by
+                for i in range(len(uniquethetas)): ## for each theta angle, adjust the phi values
+                    angle = uniquethetas[i]
+                    atangle = np.isclose(thetas, angle)
+                    idxpp0 = np.isclose(pps, 0) & atangle
+                    idxpp90 = np.isclose(pps, 90) & atangle
                     
-                    ### set new phis to be the 
+                    #===============================================================
+                    # ## if I just increase to the nearest rounded angle (no interpolation): (this is bugged currently)
+                    # dats[:,4][idxpp0] = dats[:,4][idxpp0] + roundadjustpp0[i] ## pp0
+                    # dats[:,4][idxpp90] = dats[:,4][idxpp90] + roundadjustpp90[i] ## pp90
+                    #===============================================================
                     
-                    interpValues = [] ## values I want to find the S21 at
+                    ## if I instead set the S21-data to its interpolated equivalent at the phi-adjusted angles: (need to cut out values where no interpolation is possible)
+                    for j in range(NFs): ## adjust S21 for each frequency measured
+                        Sspp0 = dats[idxpp0, 6+2*j] ## the S21 at frequency j, for this theta angle and probe polarization
+                        phispp0 = dats[idxpp0,4] ## the phi values
+                        phiAdj = adjusterpp0[i] ## how much to adjust phi values by
+                        
+                        ### set new phis to be the 
+                        
+                        interpValues = [] ## values I want to find the S21 at
+                        
+                        realInterppp0 = lowess(scipy.interpolate.Akima1DInterpolator(phispp0, np.real(S21spp0), method = 'makima')(interpValues), uniquethetas, frac = smoothingFrac, return_sorted = False) ## interpolating and smoothing, real part
                     
-                    realInterppp0 = lowess(scipy.interpolate.Akima1DInterpolator(phispp0, np.real(S21spp0), method = 'makima')(interpValues), uniquethetas, frac = smoothingFrac, return_sorted = False) ## interpolating and smoothing, real part
                 
-            
-            
-            self.plotContoursPreProcessing(dats, pol=1) ###contour plot of the data again after adjusting phi angles
-            exit()
+                
+                self.plotContoursPreProcessing(dats, pol=1) ###contour plot of the data again after adjusting phi angles
+                exit()
             
              
             #=======================================================================
@@ -168,25 +172,27 @@ class SNFData():
                 i=i+1
             ######
             
-            ## probe pol 0 has a max at 0, min at 90, probe pol 90 vice versa (but look for min at 180). look at theta = 0. Sort using freq index 1
-            for pp in (0, 90): ## for each probe pol (handle each separately)
-                 
-                ## calculate the phi adjustment needed, based on the theta = 0 data
-                phiIndices = np.intersect1d(np.argwhere(self.phiRange>55), np.argwhere(self.phiRange<215)) ## just look between 55 and 215 degrees... presumably this is well within the range of 'good values'
-                thetaSort = (np.abs(dats[:,2]-pp)*1e3 + np.abs(dats[:,3]-0)*1 + np.abs(dats[:,4])*1e-3).argsort() ## probe pol = pp, theta = 0, sorted for phi
-                thetaSortedPhis = dats[thetaSort, 4][phiIndices[0]:phiIndices[-1]]
-                #print(thetaSortedPhis)
-                thetaSortedSs = dats[thetaSort, 6][phiIndices[0]:phiIndices[-1]]
-                phiVal = thetaSortedPhis[np.argmin(np.abs(thetaSortedSs))]
-                zeroAngle = self.phiRange[np.abs(self.phiRange - (90+pp)).argmin()] ## sadly if we measure in 0.8 degree increments we don't measure 90 degrees, need same angle for both probe pols -> find closest value to phiSpacing
-                     
-                phiAdjust = zeroAngle-phiVal ## expected min. at phi=90, add this to every phi value. Then add 360 if phi is below 0?
-                print(f'Adjusting phi values for probe pols. pp = {pp}, 0 -> {phiAdjust}', end =" ")
-                dats[np.argwhere(dats[:,2] == pp),4] += phiAdjust ## adjust phi values
-                              
-            dats[:,4][dats[:,4] < 0] += 360 ## to wrap negative values around 360 degrees
-            
-            ############
+            #===================================================================
+            # ## probe pol 0 has a max at 0, min at 90, probe pol 90 vice versa (but look for min at 180). look at theta = 0. Sort using freq index 1
+            # for pp in (0, 90): ## for each probe pol (handle each separately)
+            #      
+            #     ## calculate the phi adjustment needed, based on the theta = 0 data
+            #     phiIndices = np.intersect1d(np.argwhere(self.phiRange>55), np.argwhere(self.phiRange<215)) ## just look between 55 and 215 degrees... presumably this is well within the range of 'good values'
+            #     thetaSort = (np.abs(dats[:,2]-pp)*1e3 + np.abs(dats[:,3]-0)*1 + np.abs(dats[:,4])*1e-3).argsort() ## probe pol = pp, theta = 0, sorted for phi
+            #     thetaSortedPhis = dats[thetaSort, 4][phiIndices[0]:phiIndices[-1]]
+            #     #print(thetaSortedPhis)
+            #     thetaSortedSs = dats[thetaSort, 6][phiIndices[0]:phiIndices[-1]]
+            #     phiVal = thetaSortedPhis[np.argmin(np.abs(thetaSortedSs))]
+            #     zeroAngle = self.phiRange[np.abs(self.phiRange - (90+pp)).argmin()] ## sadly if we measure in 0.8 degree increments we don't measure 90 degrees, need same angle for both probe pols -> find closest value to phiSpacing
+            #          
+            #     phiAdjust = zeroAngle-phiVal ## expected min. at phi=90, add this to every phi value. Then add 360 if phi is below 0?
+            #     print(f'Adjusting phi values for probe pols. pp = {pp}, 0 -> {phiAdjust}', end =" ")
+            #     dats[np.argwhere(dats[:,2] == pp),4] += phiAdjust ## adjust phi values
+            #                   
+            # dats[:,4][dats[:,4] < 0] += 360 ## to wrap negative values around 360 degrees
+            # 
+            # ############
+            #===================================================================
             
         
         self.len = np.shape(dats)[0] ## number of data points
@@ -211,6 +217,7 @@ class SNFData():
         self.theta_sphere, self.phi_sphere = np.meshgrid(self.thetavec_sphere, self.phivec_sphere, indexing='ij')
         
         self.S21_sphere = np.zeros((Nfs, 2, np.size(self.thetavec_sphere), np.size(self.phivec_sphere)), dtype=complex) ## freq, probe pol (theta, then phi), theta, and phi angle
+        
         # Go through the data vectors to find which entry in the sphere grid that should be populated.
         print('Attaching S-parameters to meshgrid...')
         for n in range(self.len): ## each data point
@@ -1217,7 +1224,6 @@ measDist = 3.40 ##approx distance between MRS for AUT and probe. Measure this mo
 ###
 ##newer runs, .8 degree spacing
 ###
-  
 #===============================================================================
 # files = ['manyCloakeds.8spacingPol0.csv','manyCloakeds.8spacingPol90try2.csv']
 # manyCl = SNFData(J, measDist, folder, files, name = 'Many Cloakeds')
@@ -1235,7 +1241,7 @@ measDist = 3.40 ##approx distance between MRS for AUT and probe. Measure this mo
 # manyUncl.plotFarField()
 # plt.show()
 #===============================================================================
-
+ 
 #===============================================================================
 # files = ['slotArray.8spacingPol90.csv','slotArray.8spacingPol0.csv']
 # bareSlotAdjust= []
@@ -1256,8 +1262,8 @@ measDist = 3.40 ##approx distance between MRS for AUT and probe. Measure this mo
 # plt.show()
 # #plotVsSlotPlanes([slotBare])
 #===============================================================================
-   
-   
+
+    
 #===============================================================================
 # files = ['9.35GHzArray+0.2lambdaspaceduncloakedsPol90.csv', '9.35GHzArray+0.2lambdaspaceduncloakedsPol0.csv'] ## slot array with evenly .2lambda at 1.045 GHz-spaced uncloaked antennas on top. first positioned in mid
 # slotPlusUncloaked = SNFData(J, measDist, folder, files, name = r'Slot+Uncloakeds')
@@ -1267,14 +1273,31 @@ measDist = 3.40 ##approx distance between MRS for AUT and probe. Measure this mo
 # slotPlusUncloaked.plotFarField()
 # plt.show()
 #===============================================================================
-
+ 
 #===============================================================================
 # files = ['9.35GHzArray+0.2lambdaspacedcloakedsLaterTryPol0.csv'] ## slot array with evenly .2lambda at 1.045 GHz-spaced uncloaked antennas on top. first positioned in mid
 # slotPlusCloaked = SNFData(J, measDist, folder, files, name = r'$.2\lambda$-sp. Cloakeds')
 # slotPlusCloaked.plot(pol=0)
 # plt.show()
 #===============================================================================
+###
 
+### Yet newer runs, after the motor was fixed
+
+#===============================================================================
+# files = ['2025/9.35GHzSlotArrayFixedMotorPol90.csv', '2025/9.35GHzSlotArrayFixedMotorPol0.csv'] # these are bad, use old ones instead
+# #files = ['slotArray.8spacingPol90.csv','slotArray.8spacingPol0.csv'] ## old one for comparison
+# slotBare = SNFData(J, measDist, folder, files, name = 'Bare Slot Array')
+# #ExportDataForParaview(slotBare)
+# slotBare.plot(pol=0, phase=0)
+# plt.show()
+#===============================================================================
+
+files = ['2025/9.35GHzSlotArray+ManyCloakedsFixedMotorPol0.csv']
+files = ['slotArray.8spacingPol90.csv','slotArray.8spacingPol0.csv'] ## old one for comparison
+slotBare = SNFData(J, measDist, folder, files, name = 'Slot Array+Many Cloakeds')
+slotBare.plot(pol=0, phase=0)
+plt.show()
 
 
 print('DRH50 Horn probe info:')
