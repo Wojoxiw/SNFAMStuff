@@ -56,6 +56,7 @@ class SNFData():
                     
             dats[:,2:5] = np.round(np.real(dats[:,2:5]), 3) ## round and real all angles before continuing
                     
+            self.plotContoursPreProcessing(dats, pol=1) ### this line makes a contour plot of the raw data before any processing
             self.plotContoursPreProcessing(dats, pol=0) ### this line makes a contour plot of the raw data before any processing
                  
             if(len(phiAdjust) > 0): ## try this adjustment
@@ -156,7 +157,7 @@ class SNFData():
             fVal = thetasSorted[0] ## first value
             while(True):
                 if(thetasSorted[i] == fVal):
-                    self.thetaRange = np.sort(thetasSorted[0:i])
+                    self.thetaRange = np.unique(np.sort(thetasSorted[0:i]))
                     self.thetaSpacing = self.thetaRange[1]-self.thetaRange[0]
                     break
                 i=i+1
@@ -905,7 +906,7 @@ fileLoc = 'C:/Users/al8032pa/Work Folders/Documents/CSTstuff/Scripted Farfields/
 
 nu = 1.045e9
 
-print('{:.3e}'.format(nu)+' GHz info:')
+print('{:.3e}'.format(nu/1e9)+' GHz info:')
 lamb = c/nu
 
 D = 0.7
@@ -922,7 +923,7 @@ print('J = '+str(J))
 
 nu = 9.35e9
 k = 2*pi*nu/c ## wavenumber
-print('{:.3e}'.format(nu)+' GHz info:')
+print('{:.3e}'.format(nu/1e9)+' GHz info:')
 lamb = c/nu
 ff10G = 2*D**2/lamb
 
@@ -1282,7 +1283,9 @@ measDist = 3.40 ##approx distance between MRS for AUT and probe. Measure this mo
 #===============================================================================
 ###
 
-### Yet newer runs, after the motor was fixed
+### Yet newer runs, after the motor was fixed.
+### Unfortunately, the rotation seems to slowly drift through the measurement even more than before - ~30 degree rotation after theta=0? Seems fairly non-drifting after that, for some reason...
+### Seems like no matter what I do, it ends up having drifted 50 degrees...
 
 #===============================================================================
 # files = ['2025/9.35GHzSlotArrayFixedMotorPol90.csv', '2025/9.35GHzSlotArrayFixedMotorPol0.csv'] # these are bad, use old ones instead
@@ -1293,10 +1296,13 @@ measDist = 3.40 ##approx distance between MRS for AUT and probe. Measure this mo
 # plt.show()
 #===============================================================================
 
-files = ['2025/9.35GHzSlotArray+ManyCloakedsFixedMotorPol0.csv']
-files = ['slotArray.8spacingPol90.csv','slotArray.8spacingPol0.csv'] ## old one for comparison
+#files = ['2025/9.35GHzSlotArray+ManyCloakedsFixedMotorAllAtOnceTryPol0.csv', '2025/9.35GHzSlotArray+ManyCloakedsFixedMotorAllAtOnceTryPol90.csv'] ## roll drifts 70 deg
+#files = ['2025/9.35GHzSlotArray+ManyCloakedsFixedMotorTryReverseThetasPol90.csv'] ## roll drifts 65 deg
+files = ['2025/9.35GHzSlotArray+ManyCloakedsFixedMotortheta-100to0phito240Pol0.csv', '2025/9.35GHzSlotArray+ManyCloakedsFixedMotortheta-100to0phi-180Pol0.csv', '2025/9.35GHzSlotArray+ManyCloakedsFixedMotortheta-100to0Pol90.csv', '2025/9.35GHzSlotArray+ManyCloakedsFixedMotortheta-100to0phi-180Pol90.csv'] ## ended 15/5 degrees drifted (pol90), 12 degrees drifted (pol0)
+#files = ['2025/9.35GHzSlotArray+ManyCloakedsFixedMotorAllAtOnceTry2ndHalfPol0.csv']
+#files = ['slotArray.8spacingPol90.csv','slotArray.8spacingPol0.csv'] ## old one for comparison
 slotBare = SNFData(J, measDist, folder, files, name = 'Slot Array+Many Cloakeds')
-slotBare.plot(pol=0, phase=0)
+slotBare.plot(pol=1, phase=0)
 plt.show()
 
 

@@ -30,8 +30,8 @@ class VNA(): # takes the IP address of the VNA as a string - can check with ipco
         
     def setFreqs(self, freqs = ['9.25', '9.35'], meas = 'S21'): # to measure 3 points in a freq range, given in GHz
         points = len(freqs)
-        self.VNA.write_str('SENSe1:FREQuency:STARt '+freqs[0]+'GHZ')  # Start frequency to whatever
-        self.VNA.write_str('SENSe1:FREQuency:STOP '+freqs[len(freqs)-1]+'GHZ')  # Stop frequency to whatever
+        self.VNA.write_str('SENSe1:FREQuency:STARt '+str(freqs[0])+'GHZ')  # Start frequency to whatever
+        self.VNA.write_str('SENSe1:FREQuency:STOP '+str(freqs[len(freqs)-1])+'GHZ')  # Stop frequency to whatever
         self.VNA.write('SENSe1:SWEep:POINts ' + str(points))  # Set number of sweep points to the defined number
         self.VNA.write_str('CALCulate1:PARameter:MEASure "Trc1", "'+meas+'"')  # Measurement now is S21
         
@@ -53,6 +53,12 @@ class VNA(): # takes the IP address of the VNA as a string - can check with ipco
                 data.append(Ss[i]+1j*Ss[i+1])
         return data
     
+    def measS11(self): ## measures S11
+        
+        Ss = np.fromstring(self.VNA.query_str(':CALCULATE1:DATA? SDATA'), sep=',')  # S data / in Real, then Imag format
+        fs = np.fromstring(self.VNA.query_str(':CALCULATE1:DATA:STIMULUS?'), sep=',') # f data
+        return Ss, fs
+    
     def close(self): ## when finished.
         self.VNA.close()
     
@@ -64,6 +70,7 @@ class VNA(): # takes the IP address of the VNA as a string - can check with ipco
 #####################################################################
 if __name__ == "__main__":
     # this won't be run when imported
+    print('Connecting to VNA...')
     ZVL = VNA('169.254.178.48')
     ZVL.setFreqs()
     data = ZVL.meas()
