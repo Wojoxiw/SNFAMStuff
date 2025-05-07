@@ -309,10 +309,17 @@ def Ksmn(s,m,n,theta,phi): ## Ksmn, from Hansen (A1.59,A1.60)
         K[1] = (np.outer(Kphi, prefactor))
     return K
 
-def findFarField(Ts, thetas, phis): ## finds far-field at some theta, phi using transmission coefficients, as in (2.182, 2.180), Ks as in (A1.59, A1.60)   
-                                                         ## if theta and phi vectors are same length, calculate 1-D answer rather than use outer products
+def findFarField(Ts, thetas, phis):
+    '''
+    Finds far-field at some theta, phi using transmission coefficients, as in (2.182, 2.180), Ks as in (A1.59, A1.60)
+    Returns array of theta- and phi- pol Es
+    If theta and phi vectors are same length, calculate 1-D answer rather than use outer products (returns array of [2, len(angles)]). Otherwise, [2, len(thetas), len(phis)]    
+    :param Ts: The coefficients
+    :param thetas: Vector of theta angles
+    :param phis: Vector of phi angles
+    '''
     J = len(Ts)
-     ### remove any near-zero values to avoid dividing by zero
+    ### remove any near-zero values to avoid dividing by zero
     if np.isscalar(thetas):
         if np.abs(thetas) < eps:
             thetas = eps
@@ -340,23 +347,223 @@ def findFarField(Ts, thetas, phis): ## finds far-field at some theta, phi using 
             bigK += Ts[j]*Ksmn(s, m, n, thetas, phis)
         return bigK/np.sqrt(4*pi*eta_0_h)
 
-def gravityDroopCompensation(data, d): ## takes the array of data points, and a gravity droop angle d. 
-    ##Returns compensated values at the same positions, determined by rotating each angle to (0,0), applying gravity droop to (0, angle), and rotating back - then using 2d interpolation to generate values at the original angles.
-    d = d*pi/180 ## to radians
-    rotX = np.array([[np.cos(d/2), -1j*np.sin(d/2)], [-1j*np.sin(d/2), np.cos(d/2)]]) ## rotation matrix around x-axis
-    rotY = np.array([[np.cos(d/2), -np.sin(d/2)], [np.sin(d/2), np.cos(d/2)]]) ## rotation matrix around y-axis
+def gravityDroopCompensation(data, alphas, droopDist, measurementDist, doPlots = 1):
+    '''
+    Returns compensated values at the same positions, determined as in 'Compensation of Gravity Bending of MetOp-SG on-ground Calibration Measurements', from DTU
+    Works as follows:
+    The measurement coordinate system (MCS) has axes x (pointing toward the door), y (pointing upward), and z (pointing to probe), originating where the roll and azimuthal axes meet (center of the antenna)
+    The antenna coordinate system (ACS) has corresponding axes u, v, and w which are parallel to x, y, z when the antenna points toward the probe. It originates in the flange where bending occurs (-droopDist in z). This gives the 'actual' pointing of the antenna.
+    The 'real' measurement angle is calculated from the facing of the flange: first a phi rotation around the z-axis, then an alpha-rotation around the bending axis (x-axis translated to point through the ACS origin), and finally a theta-rotation around the y-axis.
     
-    rotatedData = np.zeros(np.shape(data), dtype=complex)
+    Compensated data is then not on the regular sampling points, so 2d interpolation needs to be used later to generate values at the original angles.
     
-    for i in range(np.shape(data)[0]): ## iterate through datum to rotate its angle
-        datum = data[i] ## 3 is theta angle, 4 is phi angle
-        datum[3] -= d
-        rotatedData[i] = datum
+    :param data: The array of data points
+    :param alphas: Array of the droop angles, in degrees, for each theta angle (np.sort, np.unique, thetas)
+    :param droopDist: Distance between antenna and drooping connection
+    :param measurementDist: Distance between antenna and probe
+    :param doPlots: If True, plots some vectors to visualize the situation
+    :param dist: Distance between the intersection of rotation axes and the connection to the rotator (where the droop is)
+    '''
+    rotZ = lambda phi: np.array([[np.cos(phi), -1*np.sin(phi), 0],
+                                 [np.sin(phi), np.cos(phi), 0],
+                                 [0, 0, 1]]) ## rotation matrix around z-axis (phi rotation)
+    rotY = lambda theta: np.array([[np.cos(theta), 0, np.sin(theta)],
+                                   [0, 1, 0],
+                                   [-1*np.sin(theta), 0, np.cos(theta)]]) ## rotation matrix around y-axis (theta rotation)
+    rotX = lambda alpha: np.array([[1, 0, 0],
+                                   [0, np.cos(alpha), -1*np.sin(alpha)],
+                                   [0, np.sin(alpha), np.cos(alpha)]]) ## rotation matrix around x-axis (gravity droop rotation)
+    rotArb = lambda ang, ax: np.array([[0, -ax[2], ax[1]],
+                                       [ax[2], 0, -ax[0]],
+                                       [-ax[1], ax[0], 0]])*np.sin(ang) + np.identity(3)*np.cos(ang) + (1-np.cos(ang))*np.outer(ax, ax) ## rotation matrix around some given axis, according to Wikipedia
     
-    #newAngles = scipy.interpolate.griddata(points, values, xi, method, fill_value, rescale)
+    def rotatePlusTranslate(vectors, rMat, transVec): ## rotate around a list of axes that may be distant, but applying a translation matrix before and after. then normalize
+        ## using the 4-D matrix method (accepts 3D vec/mats)
+        transMat = lambda vec: np.array([[1, 0, 0, -vec[0]],
+                                         [0, 1, 0, -vec[1]],
+                                         [0, 0, 1, -vec[2]],
+                                         [0, 0, 0, 1]])
+        rotMat = np.array([[rMat[0, 0], rMat[0, 1], rMat[0, 2], 0],
+                           [rMat[1, 0], rMat[1, 1], rMat[1, 2], 0],
+                           [rMat[2, 0], rMat[2, 1], rMat[2, 2], 0],
+                           [0, 0, 0, 1]])
+        total = np.matmul(transMat(-1*transVec), np.matmul(rotMat, transMat(transVec))) ## translate, rotate, then translate back
+        for v in range(len(vectors)):
+            vector = vectors[v]
+            vector = np.array([vector[0], vector[1], vector[2], 1])
+            vector = np.matmul(total, vector)
+            vector = np.array([vector[0], vector[1], vector[2]]) ## convert back to 3-vector
+            vectors[v] = vector/np.linalg.norm(vector)
+            if(len(vectors) == 1): ## just the one
+                vectors = vector
+        return vectors ## normalize
+    origin = np.array([0, 0, 0]) ## antenna/MCS origin
+    probePos = np.array([0, 0, measurementDist]) ## translation from MCS to ACS
+    ACSorigin = np.array([0, 0, -droopDist]) ## origin of ACS (flange position)
+    thets = np.round(np.real(data[:,3]), 3)
+    thetas = np.sort(np.unique(thets))
+    phs = np.round(np.real(data[:,4]), 3)
+    phis = np.sort(np.unique(phs))
+    
+    xax, yax, zax = [1, 0, 0], [0, 1, 0], [0, 0, 1]
+    
+    def adjustPoint(theta, phi): ## takes the theta and phi angle of a measurement point, and returns the adjuted theta' and phi'
+        alphaidx = np.argmin(np.abs(phis*pi/180-phi))## index of the correct alpha for this theta angle
+        alpha = alphas[alphaidx]
+        thphp = ACSorigin # the origin of the ACS, as it rotates? must apply rotations on itself, since this is defined from the MCS
+        antx, anty, antz = np.matmul(rotZ(phi), xax), np.matmul(rotZ(phi), yax), np.matmul(rotZ(phi), zax) ## apply phi rotation around z-axis of MCS
+        antx, anty, antz = rotatePlusTranslate([antx, anty, antz], rotX(alpha), transVec=origin) ## apply angular droop (alpha rotation around bending axis (MCS x-axis at flange position)). should be at the origin of the ACS
+        thphp = rotatePlusTranslate([thphp], rotArb(theta, yax), transVec=ACSorigin)
+        antx, anty, antz = rotatePlusTranslate([antx, anty, antz], rotArb(theta, yax), transVec=-origin) # theta rotation around the y-axis, which is in front of the ACS origin now
+        p = probePos - thphp ## vector from ACS to probe
+        p = p/np.linalg.norm(p) # normalize
+        thetap = np.arccos(np.clip(np.dot(p, antz), -1, 1))
+        phip = np.arctan2(np.dot(p, antx), np.dot(p, anty)) + pi/2
+        
+        if(theta < 0): ## move quadrants if theta < 0
+            thetap = -thetap
+            phip = phip + pi
+            if(phip > 2*pi): ## this can go over 360 degrees
+                phip -= 2*pi
+        return thetap, phip
     
     
-    return rotatedData
+    if(doPlots > 0): ## to visualize the situation
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        #ax.quiver(0, 0, 0, 1, 0, 0, linewidth = 1.5, color = 'gray')#, label = 'x')
+        #ax.quiver(0, 0, 0, 0, 1, 0, linewidth = 1.5, color = 'gray')#, label = 'y')
+        ax.scatter(-measurementDist, 0, 0, s = 100, color = 'gray', label = 'Door') ## If the AUT is pointing at (0, 0) - this is the part of the meas. sphere that hits the door. (theta = -90, phi=0)
+        #ax.quiver(0, 0, 0, 0, 0, 1, linewidth = 1.5, color = 'gray')#, label = 'z')
+        ax.scatter(0, 0, 0, label = 'origin/AUT', s = 33)
+        ax.text(0, 0, -measurementDist, "Back of room")
+        ax.scatter(0, 0, -droopDist, label = 'flange', s = 33)
+        ax.scatter(0, 0, measurementDist, label = 'probe', s = 100)
+        ax.set_xlim([-measurementDist, measurementDist])
+        ax.set_ylim([-measurementDist, measurementDist])
+        ax.set_zlim([-measurementDist, measurementDist])
+        ax.set_aspect("equal")
+        ax.set_xlabel('X-Axis', fontsize = 12)
+        ax.set_ylabel('Y-Axis', fontsize = 12)
+        ax.set_zlabel('Z-Axis', fontsize = 12)
+        plt.title('Pointing of AUT on Meas. Sphere', fontsize = 13)
+        
+        thph00 = [0, 0, 1] ## vector for theta=phi=0 degrees pointing direction
+        theta = -8*pi/180 ## theta, phi for intended measurement coordinate, to be plotted without bending
+        phi = 90*pi/180
+        
+        thetap = theta ## theta, phi for intended measurement coordinate, to be bent with a droop of alpha
+        phip = phi
+        alphaidx = np.argmin(np.abs(phis*pi/180-phip))## index of the correct alpha for this theta angle
+        alpha = alphas[alphaidx]
+        
+        ## try using axes of antenna
+        antx, anty, antz, thph = np.matmul(rotZ(phi), xax), np.matmul(rotZ(phi), yax), np.matmul(rotZ(phi), zax), np.matmul(rotZ(phi), thph00) ## apply phi rotation around z-axis of MCS
+        ## apply angular droop
+        thph = np.matmul(rotArb(theta, yax), thph) ## apply theta rotation around y-axis of MCS
+        thphp = ACSorigin # the origin of the ACS, as it rotates? must apply rotations on itself, since this is defined from the MCS
+        antx, anty, antz = np.matmul(rotZ(phip), xax), np.matmul(rotZ(phip), yax), np.matmul(rotZ(phip), zax) ## apply phi rotation around z-axis of MCS
+        antx, anty, antz = rotatePlusTranslate([antx, anty, antz], rotX(alpha), transVec=origin) ## apply angular droop (alpha rotation around bending axis (MCS x-axis at flange position)). should be at the origin of the ACS
+        thphp = rotatePlusTranslate([thphp], rotArb(thetap, yax), transVec=ACSorigin)
+        antx, anty, antz = rotatePlusTranslate([antx, anty, antz], rotArb(thetap, yax), transVec=-origin) # theta rotation around the y-axis, which is in front of the ACS origin now
+        ax.quiver(thphp[0], thphp[1], thphp[2], antx[0], antx[1], antx[2], linewidth = 1.5, color = 'gray', label = 'u', alpha = 0.66)
+        ax.quiver(thphp[0], thphp[1], thphp[2], anty[0], anty[1], anty[2], linewidth = 1.5, color = 'black', label = 'v', alpha = 0.66)
+        ax.quiver(thphp[0], thphp[1], thphp[2], antz[0], antz[1], antz[2], linewidth = 1.5, color = 'green', label = 'w', alpha = 0.66)
+        
+        ## calculate theta and phi:
+        p = probePos - thphp ## vector from ACS to probe
+        ax.quiver(thphp[0], thphp[1], thphp[2], p[0], p[1], p[2], linewidth = 0.5, color = 'purple', label = r'$\boldsymbol{p}$')
+        p = p/np.linalg.norm(p) # normalize
+        thetap, phip = adjustPoint(thetap, phip)
+        
+        # thphp is now the pointing direction of the axis
+        antx, anty, antz, thphp= np.matmul(rotZ(phip), xax), np.matmul(rotZ(phip), yax), np.matmul(rotZ(phip), zax), np.matmul(rotZ(phip), thph00)
+        thphp = np.matmul(rotArb(thetap, yax), thphp) ## apply theta rotation around y-axis of MCS
+        ax.quiver(0, 0, 0, thph[0], thph[1], thph[2], linewidth = 1.5, color = 'red', label = r'$\theta, \phi =$'+f'({theta*180/pi:.1f}$^\circ ,${phi*180/pi:.1f}$^\circ$)', length = measurementDist)
+        ax.quiver(0, 0, 0, thphp[0], thphp[1], thphp[2], linewidth = 1.5, color = 'blue', label = r'$\theta^\prime, \phi^\prime$='+f'({thetap*180/pi:.1f}$^\circ ,${phip*180/pi:.1f}'+r'$^\circ ,\alpha=$'+f'{alpha*180/pi:.1f}'+r'$^\circ$)', length = measurementDist)
+        ## draw the intended measurement partial-sphere in gray, actual in red
+        nth = 16
+        nph = 20
+        th, ph = np.mgrid[-100*pi/180:100*pi/180:nth*1j, 0:240*pi/180:nph*1j]
+        x = np.cos(ph)*np.sin(th)
+        y = np.sin(ph)*np.sin(th)
+        z = np.cos(th)
+        ax.plot_wireframe(x*measurementDist, y*measurementDist, z*measurementDist, color="gray", linewidth = 0.5)
+        ## now the rotated one
+        nth = 20
+        nph = 15
+        th, ph = np.mgrid[-100*pi/180:100*pi/180:nth*1j, 0:240*pi/180:nph*1j]
+        for j in range(nph): ## for each point on the meshgrid, do the calculation for angles
+            for i in range(nth):
+                thetap, phip = adjustPoint(th[i, j], ph[i, j])
+                th[i, j] = thetap
+                ph[i, j] = phip
+            x = np.cos(ph)*np.sin(th)
+            y = np.sin(ph)*np.sin(th)
+            z = np.cos(th)
+            ax.plot(x[:, j]*measurementDist, y[:, j]*measurementDist, z[:, j]*measurementDist, color="blue", linewidth = 0.66)
+        plt.legend()
+        fig.tight_layout()
+        plt.show()
+    
+    print('Applying gravity droop compensation...')
+    
+    ## First convert to cartesian coordinates, then apply roll rotation (around z), gravitational droop (around x but with an origin at the bending place), then azimuthual rotation (around y).
+    # Take the y-axis to be vertical, pointed upward (theta-angle is then negative rotation around this axis)
+    # Take the z-axis to point toward the probe antenna
+    # Take the x-axis to point away from the door (to the left from the x-axis)
+    
+    for i in range(np.shape(data)[0]): # just iterate over each data point to rotate it (slow, but trying to vectorize is annoying)
+        theta = np.real(data[i, 3]) * pi/180 ## convert to radians
+        phi = np.real(data[i, 4]) * pi/180 ## convert to radians
+        if(theta == 0):
+            theta += 1e-12 ## to avoid singularities/etc
+        
+        rotatedTheta, rotatedPhi = adjustPoint(theta, phi)
+        #if(np.abs(theta) < 10*pi/180):
+        #    rotatedPhi = phi
+        
+        
+        #print(rotatedTheta, rotatedPhi, ' :: ', theta, phi)
+        data[i, 3] = rotatedTheta * 180/pi ## convert to degrees
+        data[i, 4] = rotatedPhi * 180/pi ## convert to degrees
+    return data
+
+def interpToGrid(data, oThetas, oPhis): 
+    '''
+    Interpolates the data back onto the measurement grid of the original points. 
+    :param data: The data that has been moved off the grid
+    :param oThetas: Original thetas
+    :param oPhis: Original phis
+    '''
+    gridPoints = np.transpose(np.vstack((oThetas, oPhis)))
+    thetas = np.round(np.real(data[:,3]), 3)
+    phis = np.round(np.real(data[:,4]), 3)
+    points = np.transpose(np.vstack((thetas, phis)))
+    NFs = int((np.shape(data)[1]-5)/2)
+    print('Using RBF interpolator to calculate values at grid points...')
+    for pp in [0, 90]: ## for each probe pol
+        ppindices = np.argwhere(np.abs(data[:, 2]-pp) < 1e-1)[:, 0] ## indices of data points at this probe pol
+        if(len(ppindices != 0)): ## don't do this if nothing to interpolate
+            for h in range(NFs): ## each frequency point
+                i = 6+2*h ## the index
+                Ssreal = np.real(data[ppindices, i])
+                Ssimag = np.imag(data[ppindices, i])
+                
+                ## RBF interpolator is slower, but with Nneighbours > 25 gives reasonable results even near edges
+                newSsreal = scipy.interpolate.RBFInterpolator(points[ppindices, :], Ssreal, neighbors = 50)(gridPoints[ppindices, :])
+                newSsimag = scipy.interpolate.RBFInterpolator(points[ppindices, :], Ssimag, neighbors = 50)(gridPoints[ppindices, :])
+                
+                #===============================================================
+                # ## grid interpolator is fast, but gives strange behaviour near edges. I will cut these edges off anyway, though...
+                # newSsreal = scipy.interpolate.griddata(points[ppindices, :], Ssreal, gridPoints[ppindices, :], method = 'linear', fill_value = 0)
+                # newSsimag = scipy.interpolate.griddata(points[ppindices, :], Ssimag, gridPoints[ppindices, :], method = 'linear', fill_value = 0)
+                #===============================================================
+                
+                data[ppindices, i] = newSsreal + 1j*newSsimag
+    data[:, 3] = oThetas
+    data[:, 4] = oPhis
+    return data
 
 ### REFERENCES
 
