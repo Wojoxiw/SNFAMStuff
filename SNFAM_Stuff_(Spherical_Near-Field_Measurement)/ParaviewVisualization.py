@@ -11,7 +11,7 @@ from scipy.constants import pi
 def ExportDataForParaview(data):
     '''
     Exports the S21 data (near-field for now, maybe also far-field) into a .vtk file for visualization using Paraview.
-    Uses absolute values of each polarization. Currently can just be viewed with TableToPoints, which doesn't look very good...
+    Uses absolute values of each polarization. Currently can just be viewed with TableToPoints, which doesn't look very good... I ended up not using this
     :param data: The SNFData
     '''
     print('Exporting', data.name, 'to .vtk... ( shape:',np.shape(data.theta_sphere),')')

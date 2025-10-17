@@ -283,11 +283,11 @@ def getCs(J, kA, calcNew = False): ## computes the translation coefficients abov
         np.savez(file,Cs = C)
     return C
 
-def Ksmn(s,m,n,theta,phi): ## Ksmn, from Hansen (A1.59,A1.60)
+def Ksmn(s,m,n,theta,phi): ## Ksmn, from Hansen (A1.59, A1.60)
     if(len(theta)==len(phi)): ## to get data for cut plotting
-        K = np.zeros((2, len(theta)), dtype=complex) ##pols, theta/phi vals
+        K = np.zeros((2, len(theta)), dtype=complex) ## pols, theta/phi vals
     else:
-        K = np.zeros((2, len(theta), len(phi)), dtype=complex) ##pols, theta vals, phi vals
+        K = np.zeros((2, len(theta), len(phi)), dtype=complex) ## pols, theta vals, phi vals
     if(m==0):
         mPart = 1
     else:
@@ -329,7 +329,7 @@ def findFarField(Ts, thetas, phis):
         thetas[np.abs(thetas) < eps] = eps
         thetas[np.abs(thetas - pi) < eps] = pi - eps
        
-    if(len(thetas)==len(phis)): ## to get data for cut plotting
+    if(len(thetas)==len(phis)): ## to get data for cut plotting, or arbitrary angles
         bigK = np.zeros((2, len(thetas)), dtype=complex) ## pol (theta, then phi), theta, and phi angle
         for j in range(J):
             if np.mod(j, int(J/3.2)) == 0:
