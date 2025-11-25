@@ -1214,7 +1214,7 @@ plt.rc('text.latex', preamble=r'\usepackage{amsmath} \usepackage{bm}') ## load i
 #plt.rcParams['figure.dpi'] = 72 ## just changes the size of the image?
 fileLoc = 'C:/Users/al8032pa/Work Folders/Documents/CSTstuff/Scripted Farfields/'
 
-plotS11s() ## plots measured S11 for a dipole of each type, placed over the slot array
+#plotS11s() ## plots measured S11 for a dipole of each type, placed over the slot array
 #plotCSTData.plotLinesPaper2() ## plots of CST sims for slot array + lined dipoles
 
 #===============================================================================
@@ -1766,22 +1766,20 @@ print('J = '+str(J))
 # #plt.show()
 #===============================================================================
 
-#===============================================================================
-# ### new probe measurements
-# files = ['2025b/9.35GHzProbetoProbePol90.csv','2025b/9.35GHzProbetoProbePol0.csv']
-# p2p = SNFData(J, measDist, folder, files, name = 'ProbesMeas 2025b', phiAdjustPlotting = 0)
-# #p2p.plot(pol=0, phase=0)
-# #plt.show()
-# p2p.calcProbeCoefficients()
-# #p2p.calcTsmnNoProbeCorrection()
-# #plotQs(p2p.ProbeRs)
-# #p2p.plotFarField(pol=2)
-# #plt.show()
-# #p2p.calcTsmn()
-# #plotQs(p2p.Ts)
-# #p2p.plotFarField(pol=1, colourbar=True, plotCuts=True)
-# #plt.show()
-#===============================================================================
+### new probe measurements
+files = ['2025b/9.35GHzProbetoProbePol90.csv','2025b/9.35GHzProbetoProbePol0.csv']
+p2p = SNFData(J, measDist, folder, files, name = 'ProbesMeas 2025b', phiAdjustPlotting = 0)
+#p2p.plot(pol=0, phase=0)
+#plt.show()
+p2p.calcProbeCoefficients()
+#p2p.calcTsmnNoProbeCorrection()
+#plotQs(p2p.ProbeRs)
+#p2p.plotFarField(pol=2)
+#plt.show()
+p2p.calcTsmn()
+plotQs(p2p.Ts)
+#p2p.plotFarField(pol=1, colourbar=True, plotCuts=True)
+#plt.show()
 
 
 
@@ -1918,8 +1916,10 @@ phiRots = [1.6, 0.8] ## pol0, pol90
 slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
 #slotBareb.plot(pol=1, phase=0)
 #plt.show()
-#slotBareb.calcTsmnNoProbeCorrection()
+slotBareb.calcTsmnNoProbeCorrection()
+plotQs(slotBareb.Ts)
 slotBareb.calcTsmn()
+plotQs(slotBareb.Ts)
 #slotBareb.plotFarField(colourbar=True)
 #slotBareb.plotFarFieldPixelstyle(colourbar=True)
 #plt.show()

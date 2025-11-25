@@ -19,32 +19,36 @@ def plotQs(Qs, justTriang = False):
     mmax = nmax*2+1
     Q_mn = np.zeros((mmax,nmax))
     ns = np.arange(nmax)+1
-    ms = np.arange(-nmax,nmax+1)
+    ms = np.arange(nmax+1)
     Q_n = np.zeros(nmax)
+    Q_m = np.zeros(nmax+1)
     for n in ns:
         for s in [1,2]:
             for m in np.arange(-n,n+1):
+                Q_m[np.abs(m)] += np.abs(Qs[jFromsmn(s, m, n)])
                 Q_n[n-1] += np.abs(Qs[jFromsmn(s, m, n)])
                 Q_mn[int((mmax-1)/2+m)][n-1] += np.abs(Qs[jFromsmn(s, m, n)])
                 
     ##normalize + log-scale:
-    Q_n = 10*np.log10(Q_n/np.max(Q_n))
-    Q_mn = 10*np.log10(Q_mn/np.max(Q_mn))
+    Q_m = 10*np.log10(Q_m)
+    Q_n = 10*np.log10(Q_n)
+    Q_mn = 10*np.log10(Q_mn)
     
     if(not justTriang):
         fig = plt.figure(figsize = (9,6))
-        plt.xlabel('Mode number, n')
+        plt.xlabel('Mode index')
         plt.ylabel('Normalized Amplitude [dB]')
         plt.grid(True)
         plt.title(r'Spherical mode $Q_n$ amplitude, summed over m')
-        plt.ylim(-20,0)
+        plt.ylim(-30,0)
         
-        plt.plot(ns, Q_n)
+        plt.plot(ns, Q_n-np.max(Q_m), label=r'$\Sigma_{\mathrm{s,m}}$')
+        plt.plot(ms, Q_m-np.max(Q_m), label=r'$\Sigma_{\mathrm{s,n}}$')
         plt.tight_layout()
-    
+        plt.legend(fontsize=20)
     
     fig = plt.figure(figsize = (6,9))
-    plt.imshow(Q_mn, cmap=plt.cm.jet, extent=[1,nmax,-nmax,nmax])
+    plt.imshow(Q_mn-np.max(Q_mn), cmap=plt.cm.jet, extent=[1,nmax,-nmax,nmax])
     #X, Y = np.meshgrid(ns,ms)
     #plt.contourf(ns, ms, Q_mn, 100, cmap=plt.cm.nipy_spectral)
     plt.colorbar()
