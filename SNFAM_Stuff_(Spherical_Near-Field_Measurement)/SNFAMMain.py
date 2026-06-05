@@ -177,7 +177,7 @@ class SNFData():
                 
             #self.plotContoursPreProcessing(dats, pol=2, normalize=True) ## for the baremeaspattern plot
                 
-            ## simply cutting out last and first few measurements (units of degrees)
+            ## simply cutting out last and first few phi-angles (units of degrees)
             dats = dats[(dats[:,4]>(2))] ## remove the first 2 degrees
             dats = dats[(dats[:,4]<(240))]  ## remove the last 0 degrees
             
@@ -295,9 +295,9 @@ class SNFData():
         
         plotPlanes([self],[freq])
             
-    def calcTsmnNoProbeCorrection(self, freq = 1, calcNew = True, fakeVals = None): ## calculates the transmission coefficients, from Hansen's (4.30)
+    def calcTsmnNoProbeCorrection(self, freq = 1, calcNew = False, fakeVals = None): ## calculates the transmission coefficients, from Hansen's (4.30)
         fF = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/savedTs/'
-        file = fF+self.name+'TsNPC.npz'
+        file = fF+self.name+f'{self.fs[freq]:4.5e}TsNPC.npz'
         if(os.path.isfile(file) and not calcNew):
             print('Importing previous SMCs...')
             self.Ts = np.load(file)['TsNPC']
@@ -305,9 +305,9 @@ class SNFData():
             self.Ts = SNFAMFunctions.calcTsNoProbeCorr(self, freq)
             np.savez(file,TsNPC = self.Ts)
     
-    def calcTsmn(self, calcNew = True, freq = 1, fakeVals = None): ## calculates the transmission coefficients, from Hansen's section (4.3.2) - using probe coefficients. currently assumes probe only has mu +-1 (see (3.10) maybe)
+    def calcTsmn(self, calcNew = False, freq = 1, fakeVals = None): ## calculates the transmission coefficients, from Hansen's section (4.3.2) - using probe coefficients. currently assumes probe only has mu +-1 (see (3.10) maybe)
         fF = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/savedTs/'
-        file = fF+self.name+'TsPC.npz'
+        file = fF+self.name+f'{self.fs[freq]:4.5e}TsPC.npz'
         if(os.path.isfile(file) and not calcNew):
             print('Importing previous SMCs...')
             self.Ts = np.load(file)['TsPC']
@@ -431,7 +431,8 @@ class SNFData():
         figsizex = 4.9
         if(colourbar): ### more x-space for colorbar to fit
             figsizex+=1.15
-        plt.figure(figsize = (figsizex,4.8))
+        fig = plt.figure(figsize = (figsizex,4.8))
+        ax = fig.add_subplot(111)
         cnt = plt.contourf(np.sin(pi/180*self.FFtheta_sphere)*np.cos(pi/180*self.FFphi_sphere), np.sin(pi/180*self.FFtheta_sphere)*np.sin(pi/180*self.FFphi_sphere), lvls, levels=levels, extend='both', alpha=1, cmap='turbo') ## top options: 'turbo', 'tab20c', 'nipy_spectral'
         ## plotting it twice makes the contour borderlines harder to see - also takes double filesize
         cnt.set_edgecolor("face") ## so the contour borderlines cannot be seen (they will be seen until saved as .pdf, for some reason...)
@@ -454,7 +455,8 @@ class SNFData():
         
         v = np.linspace(levels.min(), levels.max(), 9, endpoint=True)
         if(colourbar):
-            plt.colorbar(ticks=v)
+            plt.colorbar(ticks=v) 
+            #plt.colorbar(cnt, ax=[ax], ticks=v, location='left') # an attempt to get the colorbar to the left side - not compatible with tight layout, and makes it difficult to size with the other plots
         #plt.xlabel('Horizontal')
         #plt.ylabel('Vertical')
         plt.title(f'{self.name} Far-field'+titleAdd, fontsize=20)
@@ -511,8 +513,8 @@ class SNFData():
             
             ### make E- and H- plane polar plots
             thetas = np.arange(-90, 90, .1)
-            phisE = np.zeros_like(thetas)
-            phisH = np.zeros_like(thetas) + pi/2
+            phisE = np.zeros_like(thetas) + pi/2
+            phisH = np.zeros_like(thetas)
             ## must rotate for positive thetas
             phisE[thetas<0] += pi
             phisH[thetas<0] += pi
@@ -541,8 +543,8 @@ class SNFData():
                 
             fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
             ax.set_theta_offset(pi/2)
-            ax.plot(thetas*pi/180, Es, label = 'E-plane')
-            ax.plot(thetas*pi/180, Hs, label = 'H-plane')
+            ax.plot(thetas*pi/180, Es, label = 'H-plane')
+            ax.plot(thetas*pi/180, Hs, label = 'E-plane')
             ax.grid(True)
             plt.legend()
             ax.set_title(self.name+f' {self.fs[freq]/1e9:.2f} GHz'+titleAdd)
@@ -1038,19 +1040,18 @@ def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normal
     plt.xlim(-85,85)
     plt.show()
     
-def plotFarFieldDiff(refData, otherData, normalize = True, levels = None, Nlevels = 30, pol = 3, spacing = 1, colourbar = False): ## uses calculated transmission coefficients to calculate the far-field. Creates data on the sphere as in plot(), but calcs differences between 2 far-field
+def plotFarFieldDiff(refData, otherData, normalize = True, levels = None, Nlevels = 30, pol = 3, spacing = 0.1, colourbar = False): ## uses calculated transmission coefficients to calculate the far-field. Creates data on the sphere as in plot(), but calcs differences between 2 far-fields
     FFs = [] ## first is the reference, last is the other
+    spacing2 = spacing ## =1 when just doing a plane integration
     for data in [refData, otherData]:
         ##make a meshgrid of phi, theta, and S points for the top half of a sphere. Lower spacing calculates more points, is thus slower
-        data.FFthetavec_sphere = np.arange(0, 90+spacing, spacing) # Include theta = 180
-        data.FFphivec_sphere = np.arange(0, 360+spacing, spacing) # Do include phi = 360 - otherwise we get a chunk of white in the missing angle
+        data.FFthetavec_sphere = np.arange(0, 90+spacing, spacing) # Include theta = 90
+        data.FFphivec_sphere = np.arange(0, 360+spacing, spacing) # Do include phi = 360 for plotting - otherwise we get a chunk of white in the missing angle
         data.FFtheta_sphere, data.FFphi_sphere = np.meshgrid(data.FFthetavec_sphere, data.FFphivec_sphere, indexing='ij')
-        
         print('Attaching FF S-parameters to meshgrid...')
         data.FFS21_sphere = np.zeros((2, np.size(data.FFthetavec_sphere), np.size(data.FFphivec_sphere)), dtype=complex) ## pol (theta, then phi), theta, and phi angle
         data.FFS21_sphere = SNFAMFunctions.findFarField(data.Ts, data.FFthetavec_sphere*pi/180, data.FFphivec_sphere*pi/180) ## pol (theta, then phi), theta, and phi angle
         FFs.append(data.FFS21_sphere)
-        
         
     if(pol==0):
         lvls = 20*np.log10(np.abs(FFs[1][0] - FFs[0][0])+1e-12)
@@ -1059,7 +1060,7 @@ def plotFarFieldDiff(refData, otherData, normalize = True, levels = None, Nlevel
         lvls = 20*np.log10(np.abs(FFs[1][1] - FFs[0][1])+1e-12)
         titleAdd = ', Phi-pol (Horiz.)'
     elif(pol==2):
-        lvls = 20*np.log10(np.sqrt(np.abs(FFs[1][0] - FFs[0][0])**2+np.abs(FFs[1][1] - FFs[0][1])**2)+1e-12)
+        lvls = 20*np.log10(np.sqrt(np.abs(FFs[1][0] - FFs[0][0])**2+np.abs(FFs[1][1] - FFs[0][1])**2))
         titleAdd = r' Magnitude ($|F-F_0|^2$)'
     elif(pol==3):
         lvls = 20*np.log10(np.sqrt( (np.abs(FFs[1][0] - FFs[0][0])/np.abs(FFs[0][0]))**2 + (np.abs(FFs[1][1] - FFs[0][1])/np.abs(FFs[0][1]))**2 )+1e-12)
@@ -1082,10 +1083,52 @@ def plotFarFieldDiff(refData, otherData, normalize = True, levels = None, Nlevel
         
     if(normalize):
         lvls = lvls - lvls.max()
-            
     if(levels is None):
         levels = lvls.max() + np.linspace(-50, -10, Nlevels)
         
+    excludeTheta = 10 # theta values to zero within the exluded angles, to exclude from the integral
+    thetas_excluded = np.copy(refData.FFtheta_sphere)
+    thetas_excluded[thetas_excluded<excludeTheta] = 0
+    # calculate an integrated difference (points are evenly spaced, so I can simply take the sum)
+    intrefTotal = np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(refData.FFtheta_sphere*pi/180)*spacing*spacing2) # *sin(theta) since this is integration over a sphere, *spacing*spacing2 for dtheta, dphi
+    ISLPreftotal = 372417.7978138587 #intrefTotal, 9.25 GHz
+    #ISLPreftotal = 456172.6440752942 #intrefTotal, 9.35 GHz
+    print(f'{intrefTotal=}, {ISLPreftotal=}')
+    intref = np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/intrefTotal # total integral normalizes this
+    intref = 10*np.log10(intref)
+    intrefn = 10*np.log10(np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/ISLPreftotal)
+    print(f'{refData.name}, {intref=}')
+    print(f'{refData.name} (normalized to ISLPrefTotal), {intrefn=}')
+    pickOuterThetas = np.ones_like(refData.FFtheta_sphere)
+    pickOuterThetas[refData.FFtheta_sphere<excludeTheta] = 0
+    md = 10*np.log10(np.max( np.abs(np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/np.max( np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2 ))
+    print(f'Max. Diff: {md=}') ## ref. has no difference from ref., of course
+    mdn = 10*np.log10(np.max( np.abs(np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/ISLPreftotal)
+    print(f'Max. Diff (normalized to ISLPrefTotal): {mdn=}')
+    
+    intdTotal = np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(otherData.FFtheta_sphere*pi/180)*spacing*spacing2)
+    if(f'{otherData.name}'=='with Cloaked'): ## for 9.25 GHz
+        ISLPtotal=349401.8807007083#intdTotal ## for cloaked
+    else:
+        ISLPtotal=352405.55245112727#intdTotal## for uncloaked
+    #===========================================================================
+    # if(f'{otherData.name}'=='with Cloaked'): ## for 9.35 GHz
+    #     ISLPtotal=466590.5063399187#intdTotal ## for cloaked
+    # else:
+    #     ISLPtotal=475513.4859724407#intdTotal## for uncloaked
+    #===========================================================================
+    print(f'{intdTotal=}, {ISLPtotal=}')
+    intd = np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/intdTotal
+    intd = 10*np.log10(intd)
+    intdn = 10*np.log10(np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/ISLPtotal)
+    #intd = 20*np.log10(np.sum(np.sqrt(np.abs(FFs[1][0] - FFs[0][0])**2+np.abs(FFs[1][1] - FFs[0][1])**2)))
+    print(f'{otherData.name}, {intd=}')
+    print(f'{otherData.name} (normalized to ISLPTotal), {intdn=}')
+    md = 10*np.log10(np.max( np.abs(np.abs(FFs[1][0]*pickOuterThetas)**2 + np.abs(FFs[1][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/np.max( np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2 ))
+    mdn = 10*np.log10(np.max( np.abs(np.abs(FFs[1][0]*pickOuterThetas)**2 + np.abs(FFs[1][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/ISLPreftotal)
+    print(f'Max. Diff: {md=}')
+    print(f'Max. Diff (normalized to ISLPrefTotal): {mdn=}')
+    
     figsizex = 4.9
     if(colourbar): ### more x-space for colorbar to fit
         figsizex+=1.15
@@ -1173,11 +1216,13 @@ def plotS11s(): ## plots the measured S11s for the cloaked and uncloaked antenna
     #===========================================================================
     
     
-    ## plots for paper
-    cloakedreglued = np.loadtxt(fileLoc+'cloaked mid after reglueing.s1p', skiprows = 5)
-    plt.plot(cloakedreglued[:, 0]/1e9, cloakedreglued[:, 1], label = 'Cloaked Dipole', linewidth = 2.5, color='tab:orange')
-    uncloaked0 = np.loadtxt(fileLoc+'uncloaked mid.s1p', skiprows = 5)
-    plt.plot(uncloaked0[:, 0]/1e9, uncloaked0[:, 1], label = 'Uncloaked Dipole', linewidth = 2.5, color='tab:green')
+    #===========================================================================
+    # ## plots for paper
+    # cloakedreglued = np.loadtxt(fileLoc+'cloaked mid after reglueing.s1p', skiprows = 5)
+    # plt.plot(cloakedreglued[:, 0]/1e9, cloakedreglued[:, 1], label = 'Cloaked Dipole', linewidth = 2.5, color='tab:orange')
+    # uncloaked0 = np.loadtxt(fileLoc+'uncloaked mid.s1p', skiprows = 5)
+    # plt.plot(uncloaked0[:, 0]/1e9, uncloaked0[:, 1], label = 'Uncloaked Dipole', linewidth = 2.5, color='tab:green')
+    #===========================================================================
     
     #===========================================================================
     # cloakedshort = np.loadtxt(fileLoc+'cloaked shorter transmission line.s1p', skiprows = 5) ## (~18 cm long)
@@ -1186,20 +1231,65 @@ def plotS11s(): ## plots the measured S11s for the cloaked and uncloaked antenna
     # plt.plot(uncloakedshort[:, 0]/1e9, uncloakedshort[:, 1], label = 'Uncloaked SL', linewidth = 2.5)
     #===========================================================================
     
+    ##### slot array S11
+    bare = np.loadtxt(fileLoc+'bare slot array.s1p', skiprows = 5)
+    plt.plot(bare[:, 0]/1e9, bare[:, 1], label = 'Bare Slot Array', linewidth = 2, color='tab:blue')
+    cloakeds = np.loadtxt(fileLoc+'slot array + cloaked.s1p', skiprows = 5)
+    plt.plot(cloakeds[:, 0]/1e9, cloakeds[:, 1], label = 'with Cloaked', linewidth = 2, color='tab:orange')
+    uncloakeds = np.loadtxt(fileLoc+'slot array + uncloaked.s1p', skiprows = 5)
+    plt.plot(uncloakeds[:, 0]/1e9, uncloakeds[:, 1], label = 'with Uncloaked', linewidth = 2, color='tab:green')
+    
+    #===========================================================================
+    # bare2 = np.loadtxt(fileLoc+'bare slot array 2.s1p', skiprows = 5)
+    # plt.plot(bare2[:, 0]/1e9, bare2[:, 1], label = 'Bare Slot Array2', linewidth = 2.5, color='tab:orange', linestyle=':')
+    # uncloakeds2 = np.loadtxt(fileLoc+'slot array + uncloaked 2.s1p', skiprows = 5)
+    # plt.plot(uncloakeds2[:, 0]/1e9, uncloakeds2[:, 1], label = 'Slot + Uncloaked Dipoles2', linewidth = 2.5, color='tab:green', linestyle=':')
+    # cloakeds2 = np.loadtxt(fileLoc+'slot array + cloaked 2.s1p', skiprows = 5)
+    # plt.plot(cloakeds2[:, 0]/1e9, cloakeds2[:, 1], label = 'Slot + Cloaked Dipoles2', linewidth = 2.5, color='tab:purple', linestyle=':')
+    #===========================================================================
+    
+    idx = np.nonzero(np.abs(bare[:, 0]-9.35e9) < 0.25e9)[0]
+    S11b = 10**(bare[idx, 1]/20)
+    S11c = 10**(cloakeds[idx, 1]/20)
+    S11u = 10**(uncloakeds[idx, 1]/20)
+    
+    idxd1 = np.argmax(S11b-S11c)
+    print(np.max(S11b-S11c))
+    idxd2 = np.argmax(S11b-S11u)
+    print(np.max(S11b-S11u))
+    plt.axvline(x=bare[idx, 0][idxd1]/1e9, color = 'black', alpha = 1, linewidth = 1)
+    plt.axvline(x=bare[idx, 0][idxd2]/1e9, color = 'black', alpha = 1, linewidth = 1)
     
     plt.grid()
     plt.legend()
-    plt.title(r'S$_{11}$ of Dipoles over Slot Array', fontsize=20)
+    plt.title(r'S$_{11}$ of Slot Array', fontsize=20)
     plt.xlabel('Frequency [GHz]', fontsize=18)
-    plt.xlim(.8, 1.2)
+    plt.xlim(9.1, 9.6)
+    plt.ylim(-20, 0)
     plt.ylabel('Reflection Coefficient [dB]', fontsize=18)
+    plt.axvline(x=9.35, color = 'gray', linestyle = '--', alpha = 1, linewidth = 2)
+    plt.axvline(x=9.25, color = 'gray', linestyle = ':', alpha = 1, linewidth = 2)
     plt.tight_layout()
     plt.show()
+    #####
+    
+    #===========================================================================
+    # plt.grid()
+    # plt.legend()
+    # plt.title(r'S$_{11}$ of Dipoles over Slot Array', fontsize=20)
+    # plt.xlabel('Frequency [GHz]', fontsize=18)
+    # plt.xlim(.8, 1.2)
+    # plt.ylabel('Reflection Coefficient [dB]', fontsize=18)
+    # plt.tight_layout()
+    # plt.show()
+    #===========================================================================
 
 if __name__ == '__main__':
     begin = True
 startTime = timer()
 print('Start:')
+
+freq_index = 0 ## 0 for 9.25 GHz, 1 for 9.35
 
 #plt.rcParams.update({'font.size': 22})
 #plt.rc('font', size=22)          # controls default text sizes
@@ -1628,8 +1718,8 @@ J = 2*N*(N+2)
 # ### full more-than-half sphere measurements:
 # files = ['1.045GHzUpperMiddleUncloaked.8spacingPol90.csv','1.045GHzUpperMiddleUncloaked.8spacingPol0.csv'] 
 # upperMidUncl = SNFData(J, measDist, folder, files, name = 'UM Uncl Full')
-# #upperMidUncl.plot(pol=2, freq = 0)
-# #plt.show()
+# upperMidUncl.plot(pol=2, freq = 0)
+# plt.show()
 # upperMidUncl.calcTsmnNoProbeCorrection(freq = 0)
 # upperMidUncl.plotFarField(freq = 0)
 # plt.show()
@@ -1733,7 +1823,7 @@ J = 2*N*(N+2)
 ####
 # Finally used 9.35 GHz good data here
 ####
-nu = 9.35e9
+nu = 9.25e9 + 0.1e9*freq_index
 print('DRH50 Horn probe info:')
 lamb = c/nu
 D = 0.06 ## diameter of probe-enclosing sphere (high guess from datasheet)
@@ -1767,23 +1857,25 @@ print('J = '+str(J))
 #===============================================================================
 
 ### new probe measurements
-files = ['2025b/9.35GHzProbetoProbePol90.csv','2025b/9.35GHzProbetoProbePol0.csv']
-p2p = SNFData(J, measDist, folder, files, name = 'ProbesMeas 2025b', phiAdjustPlotting = 0)
-#p2p.plot(pol=0, phase=0)
-#plt.show()
-p2p.calcProbeCoefficients()
-#p2p.calcTsmnNoProbeCorrection()
-#plotQs(p2p.ProbeRs)
-#p2p.plotFarField(pol=2)
-#plt.show()
-p2p.calcTsmn()
-plotQs(p2p.Ts)
-#p2p.plotFarField(pol=1, colourbar=True, plotCuts=True)
-#plt.show()
+#===============================================================================
+# files = ['2025b/9.35GHzProbetoProbePol90.csv','2025b/9.35GHzProbetoProbePol0.csv']
+# p2p = SNFData(J, measDist, folder, files, name = 'ProbesMeas 2025b', phiAdjustPlotting = 0)
+# p2p.plot(pol=2, phase=0)
+# plt.show()
+# p2p.calcProbeCoefficients(freq=freq_index)
+# #p2p.calcTsmnNoProbeCorrection()
+# #plotQs(p2p.ProbeRs)
+# #p2p.plotFarField(pol=2)
+# #plt.show()
+# p2p.calcTsmn(freq=freq_index)
+# #plotQs(p2p.Ts)
+# p2p.plotFarField(pol=1, colourbar=True, plotCuts=True, freq=freq_index)
+# plt.show()
+#===============================================================================
 
 
 
-nu = 9.35e9
+nu = 9.25e9 + 0.1e9*freq_index
 k = 2*pi*nu/c
 lamb = c/nu
 D = 0.722
@@ -1891,8 +1983,8 @@ slotUncloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Uncloake
 #slotUncloakedsb24deg.plot(pol=1, phase=0)
 #plt.show()
 #slotUncloakedsb24deg.calcTsmnNoProbeCorrection()
-slotUncloakedsb24deg.calcTsmn()
-#slotUncloakedsb24deg.plotFarField(colourbar=False)
+slotUncloakedsb24deg.calcTsmn(freq=freq_index)
+#slotUncloakedsb24deg.plotFarField(colourbar=False, freq=freq_index)
 #slotUncloakedsb24deg.plotFarFieldPixelstyle()
 #plt.show()
      
@@ -1905,8 +1997,8 @@ slotCloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Cloaked', 
 #slotCloakedsb24deg.plot(pol=1, phase=0)
 #plt.show()
 #slotCloakedsb24deg.calcTsmnNoProbeCorrection()
-slotCloakedsb24deg.calcTsmn()
-#slotCloakedsb24deg.plotFarField(colourbar=False)
+slotCloakedsb24deg.calcTsmn(freq=freq_index)
+#slotCloakedsb24deg.plotFarField(colourbar=False, freq=freq_index)
 #slotCloakedsb24deg.plotFarFieldPixelstyle()
 #plt.show()
 
@@ -1916,21 +2008,21 @@ phiRots = [1.6, 0.8] ## pol0, pol90
 slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
 #slotBareb.plot(pol=1, phase=0)
 #plt.show()
-slotBareb.calcTsmnNoProbeCorrection()
-plotQs(slotBareb.Ts)
-slotBareb.calcTsmn()
-plotQs(slotBareb.Ts)
-#slotBareb.plotFarField(colourbar=True)
+#slotBareb.calcTsmnNoProbeCorrection()
+#plotQs(slotBareb.Ts)
+slotBareb.calcTsmn(freq=freq_index)
+#plotQs(slotBareb.Ts)
+#slotBareb.plotFarField(colourbar=True, freq=freq_index)
 #slotBareb.plotFarFieldPixelstyle(colourbar=True)
 #plt.show()
 
 
-#plotFarFieldDiff(slotBareb, slotCloakedsb24deg)
-#plotFarFieldDiff(slotBareb, slotUncloakedsb24deg)
+plotFarFieldDiff(slotBareb, slotUncloakedsb24deg, pol=2)
+plotFarFieldDiff(slotBareb, slotCloakedsb24deg, pol=2)
 
 #plotVsSlotPlanes([slotBareb], alsoRef = True, alsoNF = True)
 
-plotVsSlotPlanes([slotBareb, slotCloakedsb24deg, slotUncloakedsb24deg], alsoRef = False, alsoNF = False)
+#plotVsSlotPlanes([slotBareb, slotCloakedsb24deg, slotUncloakedsb24deg], alsoRef = False, alsoNF = False, freq=freq_index)
 
 endTime = timer()
 print('Finished in '+str(endTime-startTime)+' s')

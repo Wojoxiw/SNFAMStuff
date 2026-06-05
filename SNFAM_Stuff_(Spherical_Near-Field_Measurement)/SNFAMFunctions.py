@@ -220,6 +220,16 @@ def dPbar(m, n, theta): ## dPbar(costheta)/dtheta, as in (A1.34b). ## including 
         sintheta = np.sin(theta)
         return  -( (n-m+1)*(n+m)*lpmv(m-1,n,costheta) + m*costheta/sintheta*lpmv(m,n,costheta) ) * normfactor *(-1)**m ##P(m+1) term changed out using recurrance relation A1.32, since m+1 can be greater than n
     
+def FieldValue(Q, k, r, theta, phi, c=1): ## Finds the E-field at some point(s) [r, theta, phi], from given Qs, from (A1.1)
+    Er, Etheta, Ephi = 0j, 0j, 0j
+    for j in range(len(Q)):
+        s, m, n = smnFromj(j)
+        F = Fcsmn(c, s, m, n, r, k, theta, phi)
+        Er = Er + Q[j]*F[0]
+        Etheta = Etheta + Q[j]*F[1]
+        Ephi = Ephi + Q[j]*F[2]
+    return Er, Etheta, Ephi
+    
 def Fcsmn(c, s, m, n, A, k, theta, phi): ## spherical wave function, from (A1.45)
     if(m==0):
         mpart = 1
@@ -309,7 +319,7 @@ def Ksmn(s,m,n,theta,phi): ## Ksmn, from Hansen (A1.59, A1.60)
         K[1] = (np.outer(Kphi, prefactor))
     return K
 
-def findFarField(Ts, thetas, phis):
+def findFarField(Ts, thetas, phis, printing=True):
     '''
     Finds far-field at some theta, phi using transmission coefficients, as in (2.182, 2.180), Ks as in (A1.59, A1.60)
     Returns array of theta- and phi- pol Es
@@ -332,7 +342,7 @@ def findFarField(Ts, thetas, phis):
     if(len(thetas)==len(phis)): ## to get data for cut plotting, or arbitrary angles
         bigK = np.zeros((2, len(thetas)), dtype=complex) ## pol (theta, then phi), theta, and phi angle
         for j in range(J):
-            if np.mod(j, int(J/3.2)) == 0:
+            if np.mod(j, int(J/3.2)) == 0 and printing:
                 print(f'Computing farfield cut, j = {j} / {J}')
             s, m, n = smnFromj(j)
             bigK += Ts[j]*Ksmn(s, m, n, thetas, phis)
@@ -340,7 +350,7 @@ def findFarField(Ts, thetas, phis):
     else: ## to get data for sphere plotting
         bigK = np.zeros((2, len(thetas), len(phis)), dtype=complex) ## pol (theta, then phi), theta, and phi angle
         for j in range(J):
-            if np.mod(j, int(J/4.2)) == 0:
+            if np.mod(j, int(J/4.2)) == 0 and printing:
                 print(f'Computing farfield top sphere, j = {j} / {J}')
             s, m, n = smnFromj(j)
                
@@ -564,6 +574,7 @@ def interpToGrid(data, oThetas, oPhis):
     data[:, 3] = oThetas
     data[:, 4] = oPhis
     return data
+
 
 ### REFERENCES
 

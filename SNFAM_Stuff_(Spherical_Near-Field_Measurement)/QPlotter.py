@@ -42,8 +42,8 @@ def plotQs(Qs, justTriang = False):
         plt.title(r'Spherical mode $Q_n$ amplitude, summed over m')
         plt.ylim(-30,0)
         
-        plt.plot(ns, Q_n-np.max(Q_m), label=r'$\Sigma_{\mathrm{s,m}}$')
-        plt.plot(ms, Q_m-np.max(Q_m), label=r'$\Sigma_{\mathrm{s,n}}$')
+        plt.plot(ns, Q_n-np.max(Q_m), label=r'$\Sigma_{\mathrm{s,n}}$')
+        plt.plot(ms, Q_m-np.max(Q_m), label=r'$\Sigma_{\mathrm{s,m}}$')
         plt.tight_layout()
         plt.legend(fontsize=20)
     
