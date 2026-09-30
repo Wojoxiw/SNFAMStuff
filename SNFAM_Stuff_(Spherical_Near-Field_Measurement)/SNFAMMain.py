@@ -3,6 +3,7 @@ import numpy as np
 from math import pi
 import matplotlib.pyplot as plt
 import os
+import scipy
 from scipy.special import jn_zeros
 from scipy.special import jnp_zeros
 import scipy.signal
@@ -14,6 +15,7 @@ from QPlotter import plotQs
 import plotCSTData
 import statsmodels.api as sm
 from ParaviewVisualization import ExportDataForParaview
+import matplotlib.lines as mlines
 
 lowess = sm.nonparametric.lowess
 eps = 1e-20 ## to avoid singularities
@@ -27,7 +29,7 @@ colors = ('tab:blue','tab:orange','tab:green','tab:red','tab:purple','tab:brown'
 
 class SNFData():
     """Class to hold the data."""
-    def __init__(self, Nmodes, measurement_radius, folder, files, name, fake = False, duplicates = 'overwrite', phiCut = (10, 2.5), phiAdjust = [], gravitationalDroop = (0, 0), gravDroopDist = 10e-2, phiAdjustPlotting = 0, phiRots = None):
+    def __init__(self, Nmodes, measurement_radius, folder, files, name, fake = False, duplicates = 'overwrite', phiCut = (10, 2.5), phiAdjust = [], gravitationalDroop = (0, 0), gravDroopDist = 10e-2, phiAdjustPlotting = 0, phiRots = None, cutMeas=False):
         '''
         :param Nmodes: Number of modes to calculate
         :param measurement_radius: Distance at which the measurement was taken
@@ -42,6 +44,7 @@ class SNFData():
         :param gravDroopDist: Estimate of the distance from the antenna center to the drooping point (flange connection, but my plastic connector bends along its length...)
         :param phiAdjustPlotting: If 0, no plots. If 1 or 3, plot raw and adjusted datas. If 2 or 3, plot adjustments by theta angle. If 3, also plot gravity droop angles.
         :param phiRots: [pol0, pol90] degrees to rotate the data by in phi due to misalignment of the phi rotator - adjustments determined by inspection of the NF plots' centres, aligning with the nulls
+        :param cutMeas: True if just measurements of a cut and not SNFM - for dipoles, to avoid some processing
         '''
         self.name = name
         self.A = measurement_radius
@@ -178,8 +181,9 @@ class SNFData():
             #self.plotContoursPreProcessing(dats, pol=2, normalize=True) ## for the baremeaspattern plot
                 
             ## simply cutting out last and first few phi-angles (units of degrees)
-            dats = dats[(dats[:,4]>(2))] ## remove the first 2 degrees
-            dats = dats[(dats[:,4]<(240))]  ## remove the last 0 degrees
+            if(not cutMeas):
+                dats = dats[(dats[:,4]>(2))] ## remove the first 2 degrees
+                dats = dats[(dats[:,4]<(240))]  ## remove the last 0 degrees
             
             ### SIMPLER PHI ADJUSTMENT HERE
             if(phiRots != None):
@@ -335,6 +339,13 @@ class SNFData():
                 convergence = np.linalg.norm((self.ProbeRs-Rsold)) / np.linalg.norm(self.ProbeRs) ##calculate difference between current and previous step - using 2-norm of difference divided by 2-norm
                 print('Step '+str(n)+', convergence (relative difference): '+str(convergence)+f', norm(old) = {np.linalg.norm(Rsold)}, norm(new) = {np.linalg.norm(self.ProbeRs)}')
                 if(convergence < 1e-5): ### if it has sufficiently converged, finish
+                    
+                    for j in range(len(self.ProbeRs)):
+                        s, m, n = SNFAMFunctions.smnFromj(j)
+                        if m == -1:
+                            self.ProbeRs[j] *= np.exp(-1j*pi/2)
+                    
+                    
                     np.savez(file, Rs = self.ProbeRs)
                     print('Sufficient convergence achieved: probe coefficients calculated and saved.')
                     #plotQs(self.ProbeRs)
@@ -400,7 +411,7 @@ class SNFData():
         plt.tight_layout()
         plt.show()
     
-    def plotFarField(self, normalize = True, levels = None, Nlevels = 30, pol = 2, spacing = .1, Nplot = 777, freq = 1, plotCuts = False, plotContours = True, colourbar = False): ## uses calculated transmission coefficients to calculate the far-field. Creates data on the sphere as in plot(), then plots planes (TODO)
+    def plotFarField(self, normalize = True, normToBareSlot=False, levels = None, Nlevels = 30, pol = 2, spacing = .1, Nplot = 777, freq = 1, plotCuts = False, plotContours = True, colourbar = False): ## uses calculated transmission coefficients to calculate the far-field. Creates data on the sphere as in plot(), then plots planes (TODO)
         
         ##make a meshgrid of phi, theta, and S points for the top half of a sphere. Lower spacing calculates more points, is thus slower
         self.FFthetavec_sphere = np.arange(0, 90+spacing, spacing) # Include theta = 180
@@ -423,7 +434,10 @@ class SNFData():
             titleAdd = ' Magnitude'
             
         if(normalize):
-            lvls = lvls - lvls.max()
+            if(normToBareSlot): ## instead normalize to the bare slot array's farfield max.
+                lvls = lvls - [44.74668925898297, 45.46457209842139][freq]
+            else:
+                lvls = lvls - lvls.max()
             
         if(levels == None):
             levels = lvls.max() + np.linspace(-50, -10, Nlevels)
@@ -677,6 +691,62 @@ class SNFData():
         plt.tick_params(top=False, bottom=False, left=False, right=False, labelleft=False, labelbottom=False)
         plt.tight_layout()
         plt.gca().set_aspect(1)
+        
+def plotCutsPolar(datas, freq=1): ## takes first cloaked data, second uncloaked data
+    for plot in [[0, 'H-plane'], [90, 'V-plane']]:
+        fig, ax = plt.subplots() #subplot_kw={"projection": "polar"}
+        #ax.set_theta_zero_location("N")
+        #ax.set_theta_direction(-1)
+        #ax.set_rlim(-40, 0)
+        #ax.set_rticks([0, -10, -20, -30])
+        #ax.set_rlabel_position(210)
+        ax.set_title(f"{plot[1]} Dipole Radiation Patterns")
+        
+        plt.xlabel(r'Elevation Angle [degrees]')
+        plt.ylabel(r'Amplitude [dB]')
+        plt.grid()
+        plt.xlim(-95, 95)
+        plt.ylim(-30, 0)
+        for curve in [[0, 'Cloaked', 'tab:orange'], [1, 'Uncloaked', 'tab:green']]:
+            thetas = datas[curve[0]].thetaRange
+            S21s = datas[curve[0]].S21s[freq]
+            pos = datas[curve[0]].pos ##position/angle data for each freq. [probe pol, theta, phi]
+            S21max = np.max(20*np.log10(np.abs(S21s)))
+            ax.plot(thetas, 20*np.log10(np.abs(S21s[ (np.abs(pos[2] - plot[0])<1)&(np.abs(pos[0] - plot[0])<1) ]))-S21max, color=curve[2])
+            ax.plot(thetas, 20*np.log10(np.abs(S21s[ (np.abs(pos[2] - plot[0])<1)&(np.abs(pos[0] - plot[0])==90) ]))-S21max, color=curve[2], linestyle=':')
+            
+            
+            #===================================================================
+            # for curve in [[0, 0, {'color': 'r', 'linestyle': '-', 'label': r'H-plane, co-polar'}],
+            #               [90, 90, {'color': 'b', 'linestyle': '-', 'label': r'V-plane, co-polar'}],
+            #               [0, 90, {'color': 'r', 'linestyle': ':', 'label': r'H-plane, cross-polar'}],
+            #               [90, 0, {'color': 'b', 'linestyle': ':', 'label': r'V-plane, cross-polar'}]]: # [phi, probePol, plotsettings]
+            #     ax.plot(thetas*pi/180, 20*np.log10(np.abs(S21s[ (np.abs(pos[2] - curve[0])<1)&(np.abs(pos[0] - curve[1])<1) ]))-S21max, **curve[2])
+            #===================================================================
+            
+        #plt.legend()
+        
+        ##first legend
+        handleds = []
+        line1 = mlines.Line2D([], [], color='tab:orange', linestyle='-', label=r'Cloaked') ##fake lines to create second legend elements
+        line2 = mlines.Line2D([], [], color='tab:green', linestyle='-', label=r'Uncloaked') ##fake lines to create second legend elements
+        handleds.append(line1)
+        handleds.append(line2)
+            
+        first_legend = ax.legend(handles=handleds, loc='lower left', framealpha=0.5)
+        ##second legend
+        handleds = []
+        line1 = mlines.Line2D([], [], color='black', linestyle='-', label=r'Co-polar') ##fake lines to create second legend elements
+        line2 = mlines.Line2D([], [], color='black', linestyle=':', label=r'Cross-polar') ##fake lines to create second legend elements
+        handleds.append(line1)
+        handleds.append(line2)
+            
+        second_legend = ax.legend(handles=handleds, loc='lower right', framealpha=0.5)
+        ax.add_artist(first_legend) 
+        plt.tight_layout()
+        
+        plt.show()
+        #plt.savefig(f'C:/Users/al8032pa/Work Folders/Downloads/{data.name}.png', dpi=300, bbox_inches="tight")
             
 def plotPlanes(datas, fs = [1], pPs = []): ## plots the phi = 0 and phi = 90 planes for both probe pols. Can send in phase factors for each dataset. This cannot be trusted, because it searches for the nearest data - which may not exist
         val1 = 0 ## compare between axis 2 = val1 and axis 2 = phi2
@@ -945,13 +1015,14 @@ def getFarFieldCut(data, phi, pol = 2, spacing = .1, freq = 1, labelExtra=''): #
     thetavec = np.abs(thetaplot)*pi/180
     
     FF1 = SNFAMFunctions.findFarField(data.Ts, thetavec, phivec)
-    F_abs = 20*np.log10(np.sqrt(np.abs(FF1[0])**2 + np.abs(FF1[1])**2))
+    #FF1 = SNFAMFunctions.findFarField(SNFAMFunctions.SMCsHertzianDipole(J=len(data.Ts), rotatedForMeas = True), thetavec, phivec)
+    #F_abs = 20*np.log10(np.sqrt(np.abs(FF1[0])**2 + np.abs(FF1[1])**2))
     
-    return thetaplot, F_abs, labelExtra+f'SNFFT $\phi = {phi}^\circ$'
+    return thetaplot, FF1, labelExtra+f'SNFFT $\phi = {phi}^\circ$'
 
-def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normalize=True): ## takes data with Tsmn, plots far-field V and H planes against digitized values made from the plots from SAAB. Will also plot near-field measurements/reference data directly for comparison if true
-    linestyles = ['-', ':', '--']
-    lws = [1.5, 2, 2]
+def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normalize=True, normToBareSlot=False, addErrStuff='', plotCrossPol=False, alsoCPerr=False): ## takes data with Tsmn, plots far-field V and H planes against digitized values made from the plots from SAAB. Will also plot near-field measurements/reference data directly for comparison if true
+    linestyles = ['-', '-', '-']
+    lws = [1.5, 1.5, 1.5]
     dataV = np.transpose(np.loadtxt('C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Digitized Slot Array 9.35GHz/VPlane.txt', delimiter = ',', skiprows = 1))
     dataH = np.transpose(np.loadtxt('C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Digitized Slot Array 9.35GHz/HPlane.txt', delimiter = ',', skiprows = 1))
     if(normalize): ## normalize the digitized reference to itself
@@ -959,19 +1030,23 @@ def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normal
         dataH[1] = dataH[1]-np.max(dataH[1])
     
     plt.figure() ## V-PLANE
+    ax1 = plt.subplot(1, 1, 1)
     if(alsoRef):
         plt.plot(-dataV[0],dataV[1], label = 'Digitized Reference', linewidth = 2.5, color='red') ## -theta angles here since their measurement seems to have had it the other way (this makes our FF match theirs)
     phi1 = 90
     lE='' #if multiple datas, label them
     FF_abs = []
+    FF_cross=[]
     NF_abss = []
     FF_labels = []
     for data in datas:
         if(len(datas)>1):
             lE=data.name+' '
-        FFthetas, F_abs, label = getFarFieldCut(data, phi=phi1, labelExtra=lE) ## get data first, plot after so it can be normalized
+        FFthetas, FF, label = getFarFieldCut(data, phi=phi1, labelExtra=lE) ## get data first, plot after so it can be normalized
+        F_abs = 20*np.log10(np.sqrt(np.abs(FF[0])**2 + np.abs(FF[1])**2))
         FF_labels.append(data.name) ## just use name for final plots
         FF_abs.append(F_abs)
+        FF_cross.append(20*np.log10(np.abs(FF[0])))
         if(alsoNF): ## plot the near-field
             thetas = data.thetaRange
             SThetasPP0 = data.S21s[freq, np.argsort( np.abs(data.pos[0]-0)*1e3 + data.pos[1]*1e-3 + np.abs(data.pos[2]+data.phiSpacing/5-phi1)*1 )][0:len(thetas)] ## sorted, the the values picked out
@@ -980,15 +1055,40 @@ def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normal
             NF_abss.append(NF_abs)
     for i in range(len(datas)):
         if(normalize): ## normalize the measurements to themselves. Using the max measured, the bare slot array is ~.3 dB lower (and off to the side) compared to the other 2
-            FF_abs[i] = FF_abs[i]-np.max(FF_abs[i])
+            if(normToBareSlot): ## instead normalize to the bare slot array's farfield max.
+                FF_abs[i] = FF_abs[i]-[44.74668925898297, 45.46457209842139][freq]
+                FF_cross[i] = FF_cross[i]-[44.74668925898297, 45.46457209842139][freq]
+            else:
+                FF_abs[i] = FF_abs[i]-np.max(FF_abs[i])
+                FF_cross[i] = FF_cross[i]-np.max(FF_cross[i])
         plt.plot(FFthetas, FF_abs[i], label = FF_labels[i], color=colors[i], linestyle=linestyles[i%3], linewidth=lws[i%3])
+        if(plotCrossPol):
+            plt.plot(FFthetas, FF_cross[i], color=colors[i], linewidth=lws[i%3], linestyle = '--')
         if(alsoNF):
             if(normalize): ## normalize the measurements to the max measured
                 NF_abss[i] = NF_abss[i]-np.max(NF_abss)
             plt.plot(thetas, NF_abss[i], label = f'Near-field Meas.', linestyle = '--', alpha = 0.5, color=colors[i])
-    
+            
+    if(addErrStuff != ''):
+        folder = f'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Calc\'d Data/{addErrStuff}/'
+        load = np.load(f'{folder}withErr.npz')
+        plt.fill_between(load['thetas'], load['envMinVplaneAbs']-[44.74668925898297, 45.46457209842139][freq], load['envMaxVplaneAbs']-[44.74668925898297, 45.46457209842139][freq], alpha=0.3)
+        if(plotCrossPol and alsoCPerr):
+            plt.fill_between(load['thetas'], load['envMinVplanecross']-[44.74668925898297, 45.46457209842139][freq], load['envMaxVplanecross']-[44.74668925898297, 45.46457209842139][freq], alpha=0.3)
+        
     plt.grid()
-    plt.legend()
+    if(plotCrossPol):
+        first_legend = ax1.legend(loc='upper right')
+        ##second legend to distinguish between dashed and regular lines
+        handleds = []
+        line_dashed = mlines.Line2D([], [], color='black', linestyle='solid', linewidth=1.5, label=r'Total') ##fake lines to create second legend elements
+        handleds.append(line_dashed)
+        line_solid = mlines.Line2D([], [], color='black', linestyle='--', linewidth=1.5, label=r'Cross-pol.') ##fake lines to create second legend elements
+        handleds.append(line_solid)
+        second_legend = ax1.legend(handles=handleds, loc='upper left')
+        ax1.add_artist(first_legend)
+    else:
+        plt.legend()
     if(alsoRef):
         plt.title('Normalized SNFM vs Reference V-Plane', fontsize=20)
     else:
@@ -1000,18 +1100,22 @@ def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normal
     plt.xlim(-85,85)
     
     plt.figure() ## H-PLANE
+    ax1 = plt.subplot(1, 1, 1)
     if(alsoRef):
         plt.plot(dataH[0],dataH[1], label = 'Digitized Reference', linewidth = 2.5, color='red')
     phi2 = 0
     FF_abs = []
+    FF_cross=[]
     NF_abss = []
     FF_labels = []
     for data in datas:
         if(len(datas)>1):
             lE=data.name+' '
-        FFthetas, F_abs, label = getFarFieldCut(data, phi=phi2, labelExtra=lE) ## get data first, plot after so it can be normalized
+        FFthetas, FF, label = getFarFieldCut(data, phi=phi2, labelExtra=lE) ## get data first, plot after so it can be normalized
+        F_abs = 20*np.log10(np.sqrt(np.abs(FF[0])**2 + np.abs(FF[1])**2))
         FF_labels.append(data.name)
         FF_abs.append(F_abs)
+        FF_cross.append(20*np.log10(np.abs(FF[1])))
         if(alsoNF): ## plot the near-field
             thetas = data.thetaRange
             SThetasPP0 = data.S21s[freq, np.argsort( np.abs(data.pos[0]-0)*1e3 + data.pos[1]*1e-3 + np.abs(data.pos[2]-phi2)*1 )][0:len(thetas)] ## sorted, the the values picked out
@@ -1020,15 +1124,38 @@ def plotVsSlotPlanes(datas = [], alsoNF = True, alsoRef = True, freq = 1, normal
             NF_abss.append(NF_abs)
     for i in range(len(datas)):
         if(normalize):
-            FF_abs[i] = FF_abs[i]-np.max(FF_abs[i])
+            if(normToBareSlot): ## instead normalize to the bare slot array's farfield max.
+                FF_abs[i] = FF_abs[i]-[44.74668925898297, 45.46457209842139][freq]
+                FF_cross[i] = FF_cross[i]-[44.74668925898297, 45.46457209842139][freq]
+            else:
+                FF_abs[i] = FF_abs[i]-np.max(FF_abs[i])
+                FF_cross[i] = FF_cross[i]-np.max(FF_cross[i])
         plt.plot(FFthetas, FF_abs[i], label = FF_labels[i], color=colors[i], linestyle=linestyles[i%3], linewidth=lws[i%3])
+        if(plotCrossPol):
+            plt.plot(FFthetas, FF_cross[i], color=colors[i], linewidth=lws[i%3], linestyle = '--')
         if(alsoNF):
             if(normalize): ## normalize the measurements to the max measured
                 NF_abss[i] = NF_abss[i]-np.max(NF_abss)
             plt.plot(thetas, NF_abss[i], label = f'Near-field Meas.', linestyle = '--', alpha = 0.5, color=colors[i])
     
+    if(addErrStuff != ''):
+        plt.fill_between(load['thetas'], load['envMinHplaneAbs']-[44.74668925898297, 45.46457209842139][freq], load['envMaxHplaneAbs']-[44.74668925898297, 45.46457209842139][freq], alpha=0.3)
+        if(plotCrossPol and alsoCPerr):
+            plt.fill_between(load['thetas'], load['envMinHplanecross']-[44.74668925898297, 45.46457209842139][freq], load['envMaxHplanecross']-[44.74668925898297, 45.46457209842139][freq], alpha=0.3)
+    
     plt.grid()
-    plt.legend()
+    if(plotCrossPol):
+        first_legend = ax1.legend(loc='upper right')
+        ##second legend to distinguish between dashed and regular lines
+        handleds = []
+        line_dashed = mlines.Line2D([], [], color='black', linestyle='solid', linewidth=1.5, label=r'Total') ##fake lines to create second legend elements
+        handleds.append(line_dashed)
+        line_solid = mlines.Line2D([], [], color='black', linestyle='--', linewidth=1.5, label=r'Cross-pol.') ##fake lines to create second legend elements
+        handleds.append(line_solid)
+        second_legend = ax1.legend(handles=handleds, loc='upper left')
+        ax1.add_artist(first_legend)
+    else:
+        plt.legend()
     if(alsoRef):
         plt.title('Normalized SNFM vs Reference H-Plane', fontsize=20)
     else:
@@ -1095,16 +1222,25 @@ def plotFarFieldDiff(refData, otherData, normalize = True, levels = None, Nlevel
     #ISLPreftotal = 456172.6440752942 #intrefTotal, 9.35 GHz
     print(f'{intrefTotal=}, {ISLPreftotal=}')
     intref = np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/intrefTotal # total integral normalizes this
-    intref = 10*np.log10(intref)
-    intrefn = 10*np.log10(np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/ISLPreftotal)
-    print(f'{refData.name}, {intref=}')
-    print(f'{refData.name} (normalized to ISLPrefTotal), {intrefn=}')
+    intref = (intref)
+    intrefn = (np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/ISLPreftotal)
+    print(f'{refData.name}, {intref=} or {10*np.log10(intref)=} dB')
+    print(f'{refData.name} (normalized to ISLPrefTotal), {intrefn=} or {10*np.log10(intrefn)=} dB')
     pickOuterThetas = np.ones_like(refData.FFtheta_sphere)
     pickOuterThetas[refData.FFtheta_sphere<excludeTheta] = 0
     md = 10*np.log10(np.max( np.abs(np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/np.max( np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2 ))
     print(f'Max. Diff: {md=}') ## ref. has no difference from ref., of course
     mdn = 10*np.log10(np.max( np.abs(np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/ISLPreftotal)
     print(f'Max. Diff (normalized to ISLPrefTotal): {mdn=}')
+    
+    
+    prefsq = np.sum( (np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)**2*np.sin(thetas_excluded*pi/180)*spacing*spacing2)
+    pdiffsq = np.sum( ( (np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)-(np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2) )**2*np.sin(thetas_excluded*pi/180)*spacing*spacing2)
+    NRPD = pdiffsq / prefsq
+    prefsq = np.sum( (np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)**2*np.sin(refData.FFtheta_sphere*pi/180)*spacing*spacing2)
+    pdiffsq = np.sum( ( (np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)-(np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2) )**2*np.sin(refData.FFtheta_sphere*pi/180)*spacing*spacing2)
+    NRPDtot = pdiffsq / prefsq 
+    print(f'NRPD with/without main-lobe: {NRPDtot=}/{NRPD=}, or {10*np.log10(NRPDtot)=}/{10*np.log10(NRPD)=} dB')
     
     intdTotal = np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(otherData.FFtheta_sphere*pi/180)*spacing*spacing2)
     if(f'{otherData.name}'=='with Cloaked'): ## for 9.25 GHz
@@ -1119,15 +1255,28 @@ def plotFarFieldDiff(refData, otherData, normalize = True, levels = None, Nlevel
     #===========================================================================
     print(f'{intdTotal=}, {ISLPtotal=}')
     intd = np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/intdTotal
-    intd = 10*np.log10(intd)
-    intdn = 10*np.log10(np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/ISLPtotal)
+    intd = intd
+    intdn = (np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)/ISLPtotal)
     #intd = 20*np.log10(np.sum(np.sqrt(np.abs(FFs[1][0] - FFs[0][0])**2+np.abs(FFs[1][1] - FFs[0][1])**2)))
-    print(f'{otherData.name}, {intd=}')
-    print(f'{otherData.name} (normalized to ISLPTotal), {intdn=}')
+    print(f'{otherData.name}, {intd=} or {10*np.log10(intd)=} dB')
+    print(f'{otherData.name} (normalized to ISLPTotal), {intdn=} or {10*np.log10(intdn)=} dB')
     md = 10*np.log10(np.max( np.abs(np.abs(FFs[1][0]*pickOuterThetas)**2 + np.abs(FFs[1][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/np.max( np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2 ))
     mdn = 10*np.log10(np.max( np.abs(np.abs(FFs[1][0]*pickOuterThetas)**2 + np.abs(FFs[1][1]*pickOuterThetas)**2 - (np.abs(FFs[0][0]*pickOuterThetas)**2 + np.abs(FFs[0][1]*pickOuterThetas)**2)) )/ISLPreftotal)
     print(f'Max. Diff: {md=}')
     print(f'Max. Diff (normalized to ISLPrefTotal): {mdn=}')
+    
+    
+
+    refPart = np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)
+    nonrefPart = np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(thetas_excluded*pi/180)*spacing*spacing2)
+    ECC = np.abs(np.sum( (FFs[0][0]*np.conj(FFs[1][0]) + FFs[0][1]*np.conj(FFs[1][1]))*np.sin(thetas_excluded*pi/180)*spacing*spacing2))**2 / (refPart*nonrefPart)
+    
+    refPart = np.sum((np.abs(FFs[0][0])**2 + np.abs(FFs[0][1])**2)*np.sin(refData.FFtheta_sphere*pi/180)*spacing*spacing2)
+    nonrefPart = np.sum((np.abs(FFs[1][0])**2 + np.abs(FFs[1][1])**2)*np.sin(refData.FFtheta_sphere*pi/180)*spacing*spacing2)
+    ECCwom = np.abs(np.sum( (FFs[0][0]*np.conj(FFs[1][0]) + FFs[0][1]*np.conj(FFs[1][1]))*np.sin(refData.FFtheta_sphere*pi/180)*spacing*spacing2))**2 / (refPart*nonrefPart)
+    
+    print(f'ECC with/without main-lobe: {ECC}/{ECCwom}, or {10*np.log10(ECC)}/{10*np.log10(ECCwom)} dB')
+    
     
     figsizex = 4.9
     if(colourbar): ### more x-space for colorbar to fit
@@ -1232,12 +1381,15 @@ def plotS11s(): ## plots the measured S11s for the cloaked and uncloaked antenna
     #===========================================================================
     
     ##### slot array S11
-    bare = np.loadtxt(fileLoc+'bare slot array.s1p', skiprows = 5)
-    plt.plot(bare[:, 0]/1e9, bare[:, 1], label = 'Bare Slot Array', linewidth = 2, color='tab:blue')
-    cloakeds = np.loadtxt(fileLoc+'slot array + cloaked.s1p', skiprows = 5)
-    plt.plot(cloakeds[:, 0]/1e9, cloakeds[:, 1], label = 'with Cloaked', linewidth = 2, color='tab:orange')
-    uncloakeds = np.loadtxt(fileLoc+'slot array + uncloaked.s1p', skiprows = 5)
-    plt.plot(uncloakeds[:, 0]/1e9, uncloakeds[:, 1], label = 'with Uncloaked', linewidth = 2, color='tab:green')
+    
+    #===========================================================================
+    # bare = np.loadtxt(fileLoc+'bare slot array.s1p', skiprows = 5)
+    # plt.plot(bare[:, 0]/1e9, bare[:, 1], label = 'Bare Slot Array', linewidth = 2, color='tab:blue')
+    # cloakeds = np.loadtxt(fileLoc+'slot array + cloaked.s1p', skiprows = 5)
+    # plt.plot(cloakeds[:, 0]/1e9, cloakeds[:, 1], label = 'with Cloaked', linewidth = 2, color='tab:orange')
+    # uncloakeds = np.loadtxt(fileLoc+'slot array + uncloaked.s1p', skiprows = 5)
+    # plt.plot(uncloakeds[:, 0]/1e9, uncloakeds[:, 1], label = 'with Uncloaked', linewidth = 2, color='tab:green')
+    #===========================================================================
     
     #===========================================================================
     # bare2 = np.loadtxt(fileLoc+'bare slot array 2.s1p', skiprows = 5)
@@ -1248,6 +1400,18 @@ def plotS11s(): ## plots the measured S11s for the cloaked and uncloaked antenna
     # plt.plot(cloakeds2[:, 0]/1e9, cloakeds2[:, 1], label = 'Slot + Cloaked Dipoles2', linewidth = 2.5, color='tab:purple', linestyle=':')
     #===========================================================================
     
+    ## new meas, in chamber, after comments
+    fL = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/'
+    #bare = np.loadtxt(fL+'bareSlotArrayS11/Ss1.csv', delimiter = ',', skiprows = 3, dtype=complex)
+    bare = np.loadtxt(fL+'bareSlotArray4/Ss1.csv', delimiter = ',', skiprows = 3, dtype=complex)
+    plt.plot(bare[:, 0]/1e9, 20*np.log10(np.abs(bare[:, 1])), label = 'Bare Slot Array', linewidth = 2, color='tab:blue')
+    #cloakeds = np.loadtxt(fL+'bareSlotArray+CloakedsS11/Ss1.csv', delimiter = ',', skiprows = 3, dtype=complex)
+    cloakeds = np.loadtxt(fL+'bareSlotArray+Cloakeds5/Ss1.csv', delimiter = ',', skiprows = 3, dtype=complex)
+    plt.plot(cloakeds[:, 0]/1e9, 20*np.log10(np.abs(cloakeds[:, 1])), label = 'with Cloaked', linewidth = 2, color='tab:orange')
+    #uncloakeds = np.loadtxt(fL+'bareSlotArray+UncloakedsS11/Ss1.csv', delimiter = ',', skiprows = 3, dtype=complex)
+    uncloakeds = np.loadtxt(fL+'bareSlotArray+Uncloakeds5/Ss1.csv', delimiter = ',', skiprows = 3, dtype=complex)
+    plt.plot(uncloakeds[:, 0]/1e9, 20*np.log10(np.abs(uncloakeds[:, 1])), label = 'with Uncloaked', linewidth = 2, color='tab:green')
+    
     idx = np.nonzero(np.abs(bare[:, 0]-9.35e9) < 0.25e9)[0]
     S11b = 10**(bare[idx, 1]/20)
     S11c = 10**(cloakeds[idx, 1]/20)
@@ -1257,15 +1421,15 @@ def plotS11s(): ## plots the measured S11s for the cloaked and uncloaked antenna
     print(np.max(S11b-S11c))
     idxd2 = np.argmax(S11b-S11u)
     print(np.max(S11b-S11u))
-    plt.axvline(x=bare[idx, 0][idxd1]/1e9, color = 'black', alpha = 1, linewidth = 1)
-    plt.axvline(x=bare[idx, 0][idxd2]/1e9, color = 'black', alpha = 1, linewidth = 1)
+    #plt.axvline(x=bare[idx, 0][idxd1]/1e9, color = 'black', alpha = 1, linewidth = 1)
+    #plt.axvline(x=bare[idx, 0][idxd2]/1e9, color = 'black', alpha = 1, linewidth = 1)
     
     plt.grid()
     plt.legend()
     plt.title(r'S$_{11}$ of Slot Array', fontsize=20)
     plt.xlabel('Frequency [GHz]', fontsize=18)
     plt.xlim(9.1, 9.6)
-    plt.ylim(-20, 0)
+    plt.ylim(-25, 0)
     plt.ylabel('Reflection Coefficient [dB]', fontsize=18)
     plt.axvline(x=9.35, color = 'gray', linestyle = '--', alpha = 1, linewidth = 2)
     plt.axvline(x=9.25, color = 'gray', linestyle = ':', alpha = 1, linewidth = 2)
@@ -1283,13 +1447,221 @@ def plotS11s(): ## plots the measured S11s for the cloaked and uncloaked antenna
     # plt.tight_layout()
     # plt.show()
     #===========================================================================
+    
+def analyzeNoiseFloor(datafiles): ## using measurements where port 1 is not connected
+    for datafile in datafiles:
+        cl = np.transpose(np.loadtxt(datafile, delimiter = ',', skiprows = 3, dtype=complex)) ## [freq, S11, S12, S21, S22]
+        fs = np.real(cl[0])
+        
+        plt.plot(fs, 20*np.log10(np.abs(cl[1])), label=r'$S_{11}$')
+        plt.plot(fs, 20*np.log10(np.abs(cl[2])), label=r'$S_{12}$')
+        plt.plot(fs, 20*np.log10(np.abs(cl[3])), label=r'$S_{21}$')
+        plt.plot(fs, 20*np.log10(np.abs(cl[4])), label=r'$S_{22}$')
+        plt.title('Noise Floor Measurement')
+        plt.xlabel('Frequency [GHz]')
+        plt.ylabel('Amplitude [dB]')
+        plt.grid()
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+        
+def analyzeDrift(datafolder, superLongCombined=False): ## using measurements where port 1 is not connected for noise floor. superLongCombined if there were too many files to copy over, so they had to be combined
+    i=1
+    #t1 = float(np.loadtxt(datafolder+f'Ss{i}.csv', max_rows=1, dtype=str, delimiter='=')[1]) ## this doesn't work since I accidentally made all files use the same starting time
+    
+    times = []
+    magDrifts = [[], [], [], []] # S11, S12, S21, S22#
+    phaseDrifts = [[], [], [], []] # S11, S12, S21, S22#
+    S21s=[]
+    freq = 9.35e9 ## to choose the frequency
+    t1=0
+    if(superLongCombined):
+        with open(datafolder, 'r') as f:
+            for line_number, line in enumerate(f, start=1):
+                line = line.rstrip("\n")
+                if(line_number%7 == 1):
+                    times.append(float(line) - t1)
+                elif( ( freq==9.35e9 and line_number%7 == 6 ) or ( freq==9.25e9 and line_number%7 == 5 ) ):
+                    data = np.array(line.strip().split(','), dtype=complex)
+                    if(line_number < 7): ## first data
+                        data1 = data
+                        t1 = times[0]
+                        times[0] = 0
+                    for j in range(4):
+                        phaseDrifts[j].append(np.angle(data[1+j]) - np.angle(data1[1+j]))
+                        magDrifts[j].append( (np.abs(data[1+j]) - np.abs(data1[1+j]))/np.abs(data1[1+j]) )
+                    S21s.append(data[3]) ## for calculating stats
+    else:
+        t1 = os.path.getmtime(datafolder+f'Ss{i}.csv')
+        data1 = np.transpose(np.loadtxt(datafolder+f'Ss{i}.csv', delimiter = ',', skiprows = 3, dtype=complex)) ## [freq, S11, S12, S21, S22]
+        findex = np.argwhere(np.abs(data1[0]-freq) < 1)[0][0]
+        
+        while(os.path.isfile(datafolder+f'Ss{i}.csv')):
+            times.append(os.path.getmtime(datafolder+f'Ss{i}.csv') - t1)
+            data = np.transpose(np.loadtxt(datafolder+f'Ss{i}.csv', delimiter = ',', skiprows = 3, dtype=complex)) ## [freq, S11, S12, S21, S22]
+            for j in range(4):
+                phaseDrifts[j].append(np.angle(data[1+j][findex]) - np.angle(data1[1+j][findex]))
+                magDrifts[j].append( (np.abs(data[1+j][findex]) - np.abs(data1[1+j][findex]))/np.abs(data1[1+j][findex]) )
+            S21s.append(data[3][findex]) ## for calculating stats
+            i+=1
+            
+    S21s = np.array(S21s)
+    
+    names = [r'$S_{11}$', r'$S_{12}$', r'$S_{21}$', r'$S_{22}$']
+    for j in range(4):
+        plt.plot(np.array(times)/3600, np.array(phaseDrifts[j]), label=names[j])
+    
+    plt.title(f'Drift Measurement, (f={freq/1e9}\,GHz)')
+    plt.xlabel('Time [hours]')
+    plt.ylabel(r'Phase Drift [radians] ($\phi_n - \phi_1$)')
+    plt.grid()
+    plt.legend()
+    plt.tight_layout()
+    
+    plt.figure()
+    for j in range(4):
+        plt.plot(np.array(times)/3600, np.array(magDrifts[j]), label=names[j])
+    
+    plt.title(f'Drift Measurement, (f={freq/1e9}\,GHz)')
+    plt.xlabel('Time [hours]')
+    plt.ylabel(r'Relative Magnitude Drift ($\frac{|M_n|-|M_1|}{|M_1|}$)')
+    plt.grid()
+    plt.legend()
+    plt.tight_layout()
+    
+    
+    mags = np.abs(S21s)
+    ps = np.angle(S21s)
+    avgMag = np.mean(mags)
+    avgPhase = np.mean(ps)
+    
+    plt.figure()
+    plt.plot(20*np.log10(mags))
+    
+    rmsMag = np.sqrt(np.mean(np.square( mags-avgMag )))
+    rmsPhase = np.sqrt(np.mean(np.square( ps-avgPhase ))) * 180/pi ## in degrees
+    
+    print(f'RMS magnitude: {20*np.log10(np.sqrt(np.mean(np.square(mags))))} dB')
+    print(f'RMS deviation in magnitude: {rmsMag}, or {20*np.log10(rmsMag)} dB')
+    print(f'RMS deviation in phase (degrees): {rmsPhase}')
+    
+    plt.show()
 
+def addErrs(data, sigMag, sigPhase, sigTheta, sigPhi, polMisalign, freq=1): ## alters the data.S21_sphere introduce extra noise/angular drift/measurement drift and rms deviations, to estimate uncertainties @UnusedVariable
+    '''
+    :param data: SNFAM dataset
+    :param sigMag: deviation in magnitude
+    :param sigPhase: deviation in phase
+    :param sigTheta: deviation in theta
+    :param sigPhi: deviation in phi
+    :param polMisalign: deviation between phi angles of phi-pol and theta-pol
+    :param freq: Index of frequency to use
+    '''
+    print(f'Applying random errors to {data.name}:')
+    rng = np.random.default_rng()
+    dat = np.copy(data.S21_sphere[freq]) ## to save time, only alter the chosen frequency
+    
+    ## apply some angular uncertainty by replacing data at each angle point by data
+    for pol in [0, 1]: ## do both pols separately
+        reals = np.real(dat[pol].flatten())
+        imags = np.imag(dat[pol].flatten())
+        thets = data.theta_sphere.flatten()
+        new_thets = np.clip(thets+rng.uniform(0, sigTheta, thets.shape), np.min(data.thetavec_sphere), np.max(data.thetavec_sphere) ) ### so that it stays within measured data, to prevent possible interpolation issues
+        phis = data.phi_sphere.flatten()
+        new_phis = np.clip(phis+rng.uniform(-sigPhi/2, sigPhi/2, phis.shape), np.min(data.phivec_sphere), np.max(data.phivec_sphere) ) + rng.uniform(-polMisalign/4, polMisalign/4) ### so that it stays within measured data, to prevent possible interpolation issues. Also, add half the pol misalign to each pol
+        pts = np.transpose(np.vstack((thets, phis)))
+        new_pts = np.transpose(np.vstack((new_thets, new_phis))) ## new angle-points for the interpolation (synthetic 'actual measured' angles)
+        
+        new_reals = scipy.interpolate.RBFInterpolator(pts, reals, neighbors = 50)(new_pts)
+        new_imags = scipy.interpolate.RBFInterpolator(pts, imags, neighbors = 50)(new_pts)
+        dat[pol] = (new_reals + 1j*new_imags).reshape((len(data.thetavec_sphere), len(data.phivec_sphere)))
+        
+    ## finally, apply Gaussian magnitude and phase errors
+    datMag = np.abs(dat)
+    datAng = np.angle(dat)
+    dat = (datMag + rng.normal(np.zeros(dat.shape), sigMag)) * np.exp(1j*( datAng + rng.normal(np.zeros(dat.shape), sigPhase)*pi/180 ))
+    data.S21_sphere[freq] = dat
+    
+def calcErrFFCuts(data, run, errSettings={}, N=100, freq=1): ## saves data for plots of the H- and V-planes as in plotVsSlotPlanes for data with different errors
+    folder = f'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Calc\'d Data/{run}/'
+    measured_Ss = np.copy(data.S21_sphere) ## preserve the original to re-use
+    for i in range(N):
+        print(f'Calculating FF-cuts with errors #{i}')
+        data.name = f'BareSlotErrors{i}'
+        data.S21_sphere = np.copy(measured_Ss) ## so the original doesn't get modified more
+        if(i!=0): ## the first one is for reference
+            addErrs(data, freq=freq, **errSettings)
+        data.calcTsmn(freq=freq, calcNew=True)
+        FFthetas, FF_V, label = getFarFieldCut(data, phi=90) ## V-plane
+        FFthetas, FF_H, label = getFarFieldCut(data, phi=0) ## H-plane
+        
+        np.savez(f'{folder}withErr{i}.npz', FF_V=FF_V, FF_H = FF_H, thetas=FFthetas)
+        
+def plotErrFFCuts(run, N=100, freq=1, normToSlotArray=True):
+    folder = f'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Calc\'d Data/{run}/'
+    
+    fig1 = plt.figure()
+    ax1 = plt.subplot(1, 1, 1)
+    fig2 = plt.figure()
+    ax2 = plt.subplot(1, 1, 1)
+    ax1.set_title('V-plane')
+    ax2.set_title('H-plane')
+    
+    if(normToSlotArray):
+        normF = -[44.74668925898297, 45.46457209842139][freq]
+    else:
+        normF = 0
+    
+    
+    Hplanes = []; Vplanes = []
+    for i in range(N):
+        load = np.load(f'{folder}withErr{i}.npz')
+        #print(load.files)
+        
+        Hplanes.append(load['Hplane']);Vplanes.append(load['FF_V']);thetas=load['thetas']
+        
+        FF_V = load['FF_V']
+        FF_H = load['Hplane']
+        Vabs = 20*np.log10( np.sqrt(np.abs(FF_V[0])**2 + np.abs(FF_V[1])**2) )
+        Habs = 20*np.log10( np.sqrt(np.abs(FF_H[0])**2 + np.abs(FF_H[1])**2) )
+        
+        if(i==0): ## first one is for reference
+            ax1.plot(thetas, Vabs + normF, linewidth=2)
+            ax2.plot(thetas, Habs + normF, linewidth=2)
+        else:
+            ax1.plot(thetas, Vabs + normF, linewidth=0.3, alpha=0.5, color='gray')
+            ax2.plot(thetas, Habs + normF, linewidth=0.3, alpha=0.5, color='gray')
+    Hplanes=np.array(Hplanes)
+    Vplanes=np.array(Vplanes)
+    
+    Habss = 20*np.log10( np.sqrt(np.abs(Hplanes[:, 0])**2 + np.abs(Hplanes[:,1])**2) )
+    Vabss = 20*np.log10( np.sqrt(np.abs(Vplanes[:,0])**2 + np.abs(Vplanes[:,1])**2) )
+    
+    Hcrosss = 20*np.log10( np.abs(Hplanes[:,1]) )
+    Vcrosss = 20*np.log10( np.abs(Vplanes[:,0]) )
+    
+    ## create envelope from data
+    envMinHplaneAbs = np.min(Habss, axis=0)
+    envMaxHplaneAbs = np.max(Habss, axis=0)
+    envMinVplaneAbs = np.min(Vabss, axis=0)
+    envMaxVplaneAbs = np.max(Vabss, axis=0)
+    envMinHplanecross = np.min(Hcrosss, axis=0)
+    envMaxHplanecross = np.max(Hcrosss, axis=0)
+    envMinVplanecross = np.min(Vcrosss, axis=0)
+    envMaxVplanecross = np.max(Vcrosss, axis=0)
+    np.savez(f'{folder}withErr.npz', envMinHplaneAbs=envMinHplaneAbs, envMinVplaneAbs=envMinVplaneAbs, envMaxHplaneAbs=envMaxHplaneAbs, envMaxVplaneAbs=envMaxVplaneAbs, envMinHplanecross=envMinHplanecross, envMinVplanecross=envMinVplanecross, envMaxHplanecross=envMaxHplanecross, envMaxVplanecross=envMaxVplanecross, thetas=thetas)
+    
+    ax1.fill_between(thetas, envMinVplaneAbs + normF, envMaxVplaneAbs + normF, alpha=0.3)
+    ax2.fill_between(thetas, envMinHplaneAbs + normF, envMaxHplaneAbs + normF, alpha=0.3)
+    
+    plt.show()
+    
 if __name__ == '__main__':
     begin = True
 startTime = timer()
 print('Start:')
 
-freq_index = 0 ## 0 for 9.25 GHz, 1 for 9.35
+freq_index = 1 ## 0 for 9.25 GHz, 1 for 9.35
 
 #plt.rcParams.update({'font.size': 22})
 #plt.rc('font', size=22)          # controls default text sizes
@@ -1739,76 +2111,113 @@ J = 2*N*(N+2)
 # ### cut measurements: (UNCLOAKED)
 # phaseFactors = []
 # files = ['1.045GHzCut1UMPol0.csv','1.045GHzCut2UMPol0.csv','1.045GHzCutsUMPol90.csv']  ## upper-side (the side where the two foam blocks are glued together), in-between
-# UMUncl = SNFData(J, measDist, folder, files, name = 'UM Uncl')
+# UMUncl = SNFData(J, measDist, folder, files, name = 'UM Uncl', cutMeas=True)
 # phaseFactors.append(-k*d)
 # #UMUncl.plot(freq=0)
 # #plt.show()
-# 
+#    
 # files = ['1.045GHzCutsUCPol0.csv','1.045GHzCutsUCPol90.csv']  ## upper-side, placed by the centre of the slot array
-# UCUncl = SNFData(J, measDist, folder, files, name = 'UC Uncl')
+# UCUncl = SNFData(J, measDist, folder, files, name = 'UC Uncl', cutMeas=True)
 # phaseFactors.append(0)
-# 
+# #UCUncl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCutsUEPol0.csv','1.045GHzCutsUEPol90.csv']  ## upper-side, placed by the edge of the slot array
-# UEUncl = SNFData(J, measDist, folder, files, name = 'UE Uncl')
+# UEUncl = SNFData(J, measDist, folder, files, name = 'UE Uncl', cutMeas=True)
 # phaseFactors.append(-k*d*1.95)
-# 
+# #UEUncl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCutsLMPol0.csv','1.045GHzCutsLMPol90.csv']  ## upper-side (the side where the two foam blocks are glued together), in-between
-# LMUncl = SNFData(J, measDist, folder, files, name = 'LM Uncl')
+# LMUncl = SNFData(J, measDist, folder, files, name = 'LM Uncl', cutMeas=True)
 # phaseFactors.append(-k*d)
-# 
+# #LMUncl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCutsLCPol0.csv','1.045GHzCutsLCPol90.csv']  ## upper-side, placed by the centre of the slot array
-# LCUncl = SNFData(J, measDist, folder, files, name = 'LC Uncl')
+# LCUncl = SNFData(J, measDist, folder, files, name = 'LC Uncl', cutMeas=True)
 # phaseFactors.append(0)
-# 
+# #LCUncl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCutsLEPol0.csv','1.045GHzCutsLEPol90.csv']  ## upper-side, placed by the edge of the slot array
-# LEUncl = SNFData(J, measDist, folder, files, name = 'LE Uncl')
+# LEUncl = SNFData(J, measDist, folder, files, name = 'LE Uncl', cutMeas=True)
 # phaseFactors.append(-k*d*1.95)
+# #LEUncl.plot(freq=0)
+# #plt.show()
+#   
+#  
+# #plotCutsPolar([UMUncl, UCUncl, UEUncl, LMUncl, LCUncl, LEUncl])
+#  
+# #===============================================================================
+# # datas = [UMUncl,UEUncl,UCUncl,LMUncl,LEUncl,LCUncl]
+# # angle = (0,0)
+# # print('pre-optim: ',phaseFactors)
+# # phaseFactors = scipy.optimize.minimize(calcBroadside, [0,0,0,0,0,0], method='Nelder-Mead', args=(datas, angle))#bounds = [(0,2*pi),(0,2*pi),(0,2*pi),(0,2*pi),(0,2*pi),(0,2*pi)])
+# # print('optim: ',phaseFactors)
+# # phaseFactors = phaseFactors.x
+# # print('optim: ',phaseFactors)
+# # plotPlanes(datas,[0],phaseFactors)
+# # plt.show()
+# #===============================================================================
 # 
-# datas = [UMUncl,UEUncl,UCUncl,LMUncl,LEUncl,LCUncl]
-# angle = (0,0)
-# print('pre-optim: ',phaseFactors)
-# phaseFactors = scipy.optimize.minimize(calcBroadside, [0,0,0,0,0,0], method='Nelder-Mead', args=(datas, angle))#bounds = [(0,2*pi),(0,2*pi),(0,2*pi),(0,2*pi),(0,2*pi),(0,2*pi)])
-# print('optim: ',phaseFactors)
-# phaseFactors = phaseFactors.x
-# print('optim: ',phaseFactors)
-# plotPlanes(datas,[0],phaseFactors)
-# plt.show()
-#===============================================================================
-
-#===============================================================================
-# files = ['1.045GHzCloakedUMtry2Pol90.csv','1.045GHzCloakedUMtry2Pol0.csv']
-# slots = SNFData(J, measDist, folder, files, name = 'UM Cloaked Full')
-# slots.plot(pol=2, freq=0)
-# plt.show()
+# #===============================================================================
+# # files = ['1.045GHzCloakedUMtry2Pol90.csv','1.045GHzCloakedUMtry2Pol0.csv']
+# # slots = SNFData(J, measDist, folder, files, name = 'UM Cloaked Full', cutMeas=True)
+# # slots.plot(pol=2, freq=0)
+# # plt.show()
+# # 
+# # files = ['1.045GHzUpperMiddleUncloaked.8spacingPol0.csv','1.045GHzUpperMiddleUncloaked.8spacingPol90.csv']
+# # slots = SNFData(J, measDist, folder, files, name = 'UM Unloaked Full', cutMeas=True)
+# # slots.plot(pol=2, freq=0)
+# # plt.show()
+# #===============================================================================
 # 
 # ### cut measurements: (CLOAKED)
 # phaseFactors = []
 # files = ['1.045GHzCloakedCutsUMPol0.csv','1.045GHzCloakedCutsUMPol90.csv']  ## upper-side (the side where the two foam blocks are glued together), in-between
-# UMUncl = SNFData(J, measDist, folder, files, name = 'UM Cloak')
+# UMCl = SNFData(J, measDist, folder, files, name = 'UM Cloak', cutMeas=True)
 # phaseFactors.append(-k*d)
-# #UMUncl.plot(freq=0)
+# #UMCl.plot(freq=0)
 # #plt.show()
-#  
+#    
 # files = ['1.045GHzCloakedCutsUCPol0.csv','1.045GHzCloakedCutsUCPol90.csv']  ## upper-side, placed by the centre of the slot array
-# UCUncl = SNFData(J, measDist, folder, files, name = 'UC Cloak')
+# UCCl = SNFData(J, measDist, folder, files, name = 'UC Cloak', cutMeas=True)
 # phaseFactors.append(0)
-#  
+# #UCCl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCloakedCutsUEPol0.csv','1.045GHzCloakedCutsUEPol90.csv']  ## upper-side, placed by the edge of the slot array
-# UEUncl = SNFData(J, measDist, folder, files, name = 'UE Cloak')
+# UECl = SNFData(J, measDist, folder, files, name = 'UE Cloak', cutMeas=True)
 # phaseFactors.append(-k*d*1.95)
-#  
+# #UECl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCloakedCutsLMPol0.csv','1.045GHzCloakedCutsLMPol90.csv']  ## upper-side (the side where the two foam blocks are glued together), in-between
-# LMUncl = SNFData(J, measDist, folder, files, name = 'LM Cloak')
+# LMCl = SNFData(J, measDist, folder, files, name = 'LM Cloak', cutMeas=True)
 # phaseFactors.append(-k*d)
-#  
+# #LMCl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCloakedCutsLCPol0.csv','1.045GHzCloakedCutsLCPol90.csv']  ## upper-side, placed by the centre of the slot array
-# LCUncl = SNFData(J, measDist, folder, files, name = 'LC Cloak')
+# LCCl = SNFData(J, measDist, folder, files, name = 'LC Cloak', cutMeas=True)
 # phaseFactors.append(0)
-#  
+# #LCCl.plot(freq=0)
+# #plt.show()
+#    
 # files = ['1.045GHzCloakedCutsLEPol0.csv','1.045GHzCloakedCutsLEPol90.csv']  ## upper-side, placed by the edge of the slot array
-# LEUncl = SNFData(J, measDist, folder, files, name = 'LE Cloak')
+# LECl = SNFData(J, measDist, folder, files, name = 'LE Cloak', cutMeas=True)
 # phaseFactors.append(-k*d*1.95)
-#  
+# #LECl.plot(freq=0)
+# #plt.show()
+#    
+# #plotCutsPolar([UMCl, UCCl, UECl, LMCl, LCCl, LECl])
+# 
+# plotCutsPolar([UMCl, UMUncl])
+# plotCutsPolar([LMCl, LMUncl])
+#===============================================================================
+  
+#===============================================================================
 # datas = [UMUncl,UEUncl,UCUncl,LMUncl,LEUncl,LCUncl]
 # angle = (0,0)
 # print('pre-optim: ',phaseFactors)
@@ -1856,23 +2265,25 @@ print('J = '+str(J))
 # #plt.show()
 #===============================================================================
 
-### new probe measurements
 #===============================================================================
+# ## new probe measurements
 # files = ['2025b/9.35GHzProbetoProbePol90.csv','2025b/9.35GHzProbetoProbePol0.csv']
 # p2p = SNFData(J, measDist, folder, files, name = 'ProbesMeas 2025b', phiAdjustPlotting = 0)
-# p2p.plot(pol=2, phase=0)
-# plt.show()
-# p2p.calcProbeCoefficients(freq=freq_index)
-# #p2p.calcTsmnNoProbeCorrection()
+# #p2p.plot(pol=2, phase=0)
+# #plt.show()
+# p2p.calcProbeCoefficients(freq=freq_index, calcNew=True)
+# p2p.calcTsmnNoProbeCorrection(calcNew=True)
 # #plotQs(p2p.ProbeRs)
 # #p2p.plotFarField(pol=2)
 # #plt.show()
-# p2p.calcTsmn(freq=freq_index)
+# p2p.calcTsmn(freq=freq_index, calcNew=True)
 # #plotQs(p2p.Ts)
-# p2p.plotFarField(pol=1, colourbar=True, plotCuts=True, freq=freq_index)
-# plt.show()
+# #p2p.plotFarField(pol=1, colourbar=True, plotCuts=True, freq=freq_index)
+# #plt.show()
+#  
+#  
+# plotVsSlotPlanes([p2p], plotCrossPol=True, alsoRef=False)
 #===============================================================================
-
 
 
 nu = 9.25e9 + 0.1e9*freq_index
@@ -1976,53 +2387,124 @@ slotArrayGravDroop = (1.03, .17)
 #===============================================================================
 
 
-#files = ['2025b/9.35GHzSlot+24degreeUncloakedsPol0.csv', '2025b/9.35GHzSlot+24degreeUncloakedsPol90.csv']
-files = ['2025b/9.35GHzSlot+24degreeUncloakedsRegluedPol0.csv', '2025b/9.35GHzSlot+24degreeUncloakedsRegluedPol90.csv']
-phiRots = [0.8, 0] ## pol0, pol90
-slotUncloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Uncloaked', phiAdjustPlotting=0, phiRots=phiRots)
-#slotUncloakedsb24deg.plot(pol=1, phase=0)
-#plt.show()
-#slotUncloakedsb24deg.calcTsmnNoProbeCorrection()
-slotUncloakedsb24deg.calcTsmn(freq=freq_index)
-#slotUncloakedsb24deg.plotFarField(colourbar=False, freq=freq_index)
-#slotUncloakedsb24deg.plotFarFieldPixelstyle()
-#plt.show()
-     
-     
-#files = ['2025b/9.35GHzSlot+24degreeCloakedsPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsPol90.csv']
-#files = ['2025b/9.35GHzSlot+24degreeCloakedstry2Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2phi150.4+Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2Pol90.csv']
-files = ['2025b/9.35GHzSlot+24degreeCloakedsRegluedPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsRegluedPol90.csv']
-phiRots = [0, -1.6] ## pol0, pol90
-slotCloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Cloaked', phiAdjustPlotting=0, phiRots=phiRots)
-#slotCloakedsb24deg.plot(pol=1, phase=0)
-#plt.show()
-#slotCloakedsb24deg.calcTsmnNoProbeCorrection()
-slotCloakedsb24deg.calcTsmn(freq=freq_index)
-#slotCloakedsb24deg.plotFarField(colourbar=False, freq=freq_index)
-#slotCloakedsb24deg.plotFarFieldPixelstyle()
-#plt.show()
+#===============================================================================
+# #files = ['2025b/9.35GHzSlot+24degreeUncloakedsPol0.csv', '2025b/9.35GHzSlot+24degreeUncloakedsPol90.csv']
+# files = ['2025b/9.35GHzSlot+24degreeUncloakedsRegluedPol0.csv', '2025b/9.35GHzSlot+24degreeUncloakedsRegluedPol90.csv']
+# phiRots = [0.8, 0] ## pol0, pol90
+# slotUncloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Uncloaked', phiAdjustPlotting=0, phiRots=phiRots)
+# #slotUncloakedsb24deg.plot(pol=1, phase=0)
+# #plt.show()
+# #slotUncloakedsb24deg.calcTsmnNoProbeCorrection()
+# slotUncloakedsb24deg.calcTsmn(freq=freq_index, calcNew=True)
+# #slotUncloakedsb24deg.plotFarField(colourbar=False, freq=freq_index, normToBareSlot=True)
+# #slotUncloakedsb24deg.plotFarFieldPixelstyle()
+# #plt.show()
+#              
+#              
+# #files = ['2025b/9.35GHzSlot+24degreeCloakedsPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsPol90.csv']
+# #files = ['2025b/9.35GHzSlot+24degreeCloakedstry2Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2phi150.4+Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2Pol90.csv']
+# files = ['2025b/9.35GHzSlot+24degreeCloakedsRegluedPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsRegluedPol90.csv']
+# phiRots = [0, -1.6] ## pol0, pol90
+# slotCloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Cloaked', phiAdjustPlotting=0, phiRots=phiRots)
+# #slotCloakedsb24deg.plot(pol=1, phase=0)
+# #plt.show()
+# #slotCloakedsb24deg.calcTsmnNoProbeCorrection()
+# slotCloakedsb24deg.calcTsmn(freq=freq_index, calcNew=True)
+# #slotCloakedsb24deg.plotFarField(colourbar=False, freq=freq_index, normToBareSlot=True)
+# #slotCloakedsb24deg.plotFarFieldPixelstyle()
+# #plt.show()
+#        
+# files = ['2025b/9.35GHzSlotArraynewmeas2Pol0try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol0try2.210.4+.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.175.2+.csv']
+# #files = ['2025b/9.35GHzSlotBareYetAgainPol0.csv', '2025b/9.35GHzSlotBareYetAgainPol90.csv', '2025b/9.35GHzSlotBareYetAgain140+Pol90.csv']
+# phiRots = [1.6, 0.8] ## pol0, pol90
+# slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
+# #slotBareb.plot(pol=1, phase=0)
+# #plt.show()
+# #slotBareb.calcTsmnNoProbeCorrection()
+# #plotQs(slotBareb.Ts)
+# slotBareb.calcTsmn(freq=freq_index, calcNew=True)
+# #slotBareb.calcTsmnNoProbeCorrection(freq=freq_index, calcNew=True)
+# #plotQs(slotBareb.Ts)
+# #slotBareb.plotFarField(colourbar=True, freq=freq_index, normToBareSlot=True)
+# #slotBareb.plotFarFieldPixelstyle(colourbar=True)
+# #plt.show()
+#        
+#  
+# plotFarFieldDiff(slotBareb, slotUncloakedsb24deg, pol=2)
+# plotFarFieldDiff(slotBareb, slotCloakedsb24deg, pol=2)
+#===============================================================================
+       
+#plotVsSlotPlanes([slotBareb], alsoRef = True, alsoNF = False, normToBareSlot=True, plotCrossPol=True, addErrStuff='Runs3', alsoCPerr=True)
+       
+#plotVsSlotPlanes([slotBareb, slotCloakedsb24deg, slotUncloakedsb24deg], alsoRef = False, alsoNF = False, freq=freq_index, normToBareSlot=True, plotCrossPol=True, addErrStuff='Runs3')
 
-files = ['2025b/9.35GHzSlotArraynewmeas2Pol0try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol0try2.210.4+.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.175.2+.csv']
-#files = ['2025b/9.35GHzSlotBareYetAgainPol0.csv', '2025b/9.35GHzSlotBareYetAgainPol90.csv', '2025b/9.35GHzSlotBareYetAgain140+Pol90.csv']
-phiRots = [1.6, 0.8] ## pol0, pol90
-slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
-#slotBareb.plot(pol=1, phase=0)
-#plt.show()
-#slotBareb.calcTsmnNoProbeCorrection()
-#plotQs(slotBareb.Ts)
-slotBareb.calcTsmn(freq=freq_index)
-#plotQs(slotBareb.Ts)
-#slotBareb.plotFarField(colourbar=True, freq=freq_index)
-#slotBareb.plotFarFieldPixelstyle(colourbar=True)
-#plt.show()
 
 
-plotFarFieldDiff(slotBareb, slotUncloakedsb24deg, pol=2)
-plotFarFieldDiff(slotBareb, slotCloakedsb24deg, pol=2)
+###
+### 2026 adressing reviewer's comments stuff - 2026-9-1 and on##
+###
 
-#plotVsSlotPlanes([slotBareb], alsoRef = True, alsoNF = True)
+#===============================================================================
+# nFMeas1 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/initialNoiseFloorMeas/Ss.csv'
+# nFMeas2 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/laterNoiseFloorMeas/Ss1.csv'
+# nFMeas3 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/driftMeas/Ss2.csv'
+# nFMeas4 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/driftMeas/Ss420.csv'
+# analyzeNoiseFloor([nFMeas1, nFMeas2, nFMeas3, nFMeas4])
+#===============================================================================
 
-#plotVsSlotPlanes([slotBareb, slotCloakedsb24deg, slotUncloakedsb24deg], alsoRef = False, alsoNF = False, freq=freq_index)
+#===============================================================================
+# nFMeas1 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/driftMeasActuallyConnected/Ss1.csv'
+# nFMeas2 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/driftMeasActuallyConnected/Ss150.csv'
+# nFMeas3 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/driftMeasActuallyConnected/Ss300.csv'
+# analyzeNoiseFloor([nFMeas1, nFMeas2, nFMeas3])
+#===============================================================================
+
+#===============================================================================
+# nFMeas1 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/manyNoiseFloors/Ss1.csv'
+# nFMeas2 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/manyNoiseFloors/Ss200.csv'
+# nFMeas3 = 'C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/manyNoiseFloors/Ss400.csv'
+# analyzeNoiseFloor([nFMeas1, nFMeas2, nFMeas3])
+#===============================================================================
+
+#analyzeDrift('C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/driftMeasActuallyConnected/')
+#analyzeDrift('C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/manyNoiseFloors/') ## for noise floor (RMS magnitude of this)
+#analyzeDrift('C:/Users/al8032pa/Work Folders/Documents/antenna measurements/SNFAM/Reviewer Comments Followup Stuff/Measurements/Longer2freqsDriftMeas/combinedData.csv', superLongCombined=True) ## for the angular/amplitude rms deviations
+
+
+#===============================================================================
+# ######
+# ### Some error analysis stuff
+# ######
+# files = ['2025b/9.35GHzSlotArraynewmeas2Pol0try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol0try2.210.4+.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.175.2+.csv']
+# phiRots = [1.6, 0.8] ## pol0, pol90
+# slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
+# slotBareb.calcTsmn(freq=freq_index)
+# 
+# 
+# errSettings={'sigMag': 5.4e-5, 'sigPhase': 0.75, 'sigTheta': 0.1, 'sigPhi': 0.2, 'polMisalign': 0.4} ## -94 dB noise floor from manyNoiseFloors measurement, -85 dB and 0.75 degree deviations from second half of Longer2freqsDriftMeas
+# 
+# #===============================================================================
+# # ### plot 2 at these error settings
+# # sbErr1 = SNFData(J, measDist, folder, files, name = 'Bare Slot Array + Errs1', phiAdjustPlotting=0, phiRots=phiRots)
+# # addErrs(sbErr1, **errSettings)
+# # sbErr1.calcTsmn(freq=freq_index, calcNew=True)
+# # 
+# # sbErr2 = SNFData(J, measDist, folder, files, name = 'Bare Slot Array + Errs2', phiAdjustPlotting=0, phiRots=phiRots)
+# # addErrs(sbErr2, **errSettings)
+# # sbErr2.calcTsmn(freq=freq_index, calcNew=True)
+# # 
+# # plotVsSlotPlanes([slotBareb, sbErr1, sbErr2], alsoRef = False, alsoNF = False, freq=freq_index, normToBareSlot=True)
+# #===============================================================================
+# 
+# #plotErrFFCuts('Runs1')
+# 
+# #calcErrFFCuts(slotBareb, 'Runs2', errSettings, freq=freq_index)
+# #plotErrFFCuts('Runs2')
+# 
+# #calcErrFFCuts(slotBareb, 'Runs3', errSettings, freq=freq_index) ## one more time to save theta- and phi- components
+# #plotErrFFCuts('Runs3', freq=freq_index)
+#===============================================================================
+
 
 endTime = timer()
 print('Finished in '+str(endTime-startTime)+' s')

@@ -42,7 +42,7 @@ def JfromN(N):
 def RfromT(T): ## assuming here that the antenna is reciprocal:
     R = np.zeros(len(T), dtype=complex)
     
-    for j in range(len(T)): ## how Daniel did it
+    for j in range(len(T)): ## how Daniel did it (first transforming T to T', then to R?)
         s, m, n = smnFromj(j)
         R[j] = (-1)**(n) * T[j]
     
@@ -111,7 +111,7 @@ def calcTsProbeCorr(data, freq): ## calculates Tsmn as in section (4.3.2) with s
     thetavec[np.abs(thetavec - pi) < eps] = pi - eps
     
     ## the phi integral
-    wm_theta = np.fft.fft(Ss[0], axis=1)*dPhi ## chi = 0, theta-hat part
+    wm_theta = np.fft.fft(Ss[0], axis=1)*dPhi ## chi = 0, theta-hat part ## possible normalization issue with a factor of 2*pi here?
     wm_phi = np.fft.fft(Ss[1], axis=1)*dPhi ## chi = pi/2, phi-hat part
     ### 4.61 and on, the chi integral (4.65, 4.66)
     wmum_p1 = (wm_theta - 1j*wm_phi)/2 ## w_mum, +1 part
