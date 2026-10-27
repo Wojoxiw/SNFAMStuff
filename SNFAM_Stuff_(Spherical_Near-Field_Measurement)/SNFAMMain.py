@@ -411,8 +411,7 @@ class SNFData():
         plt.tight_layout()
         plt.show()
     
-    def plotFarField(self, normalize = True, normToBareSlot=False, levels = None, Nlevels = 30, pol = 2, spacing = .1, Nplot = 777, freq = 1, plotCuts = False, plotContours = True, colourbar = False): ## uses calculated transmission coefficients to calculate the far-field. Creates data on the sphere as in plot(), then plots planes (TODO)
-        
+    def plotFarField(self, normalize = True, normToBareSlot=False, levels = None, Nlevels = 30, pol = 2, spacing = .1, Nplot = 777, freq = 1, plotCuts = False, plotContours = True, colourbar = False, justContours=False, makingImg=False): ## uses calculated transmission coefficients to calculate the far-field. Creates data on the sphere as in plot(), then plots planes (TODO)
         ##make a meshgrid of phi, theta, and S points for the top half of a sphere. Lower spacing calculates more points, is thus slower
         self.FFthetavec_sphere = np.arange(0, 90+spacing, spacing) # Include theta = 180
         self.FFphivec_sphere = np.arange(0, 360+spacing, spacing) # Do include phi = 360 - otherwise we get a chunk of white in the missing angle
@@ -439,14 +438,32 @@ class SNFData():
             else:
                 lvls = lvls - lvls.max()
             
-        if(levels == None):
+        if(levels is None):
             levels = lvls.max() + np.linspace(-50, -10, Nlevels)
             
         figsizex = 4.9
-        if(colourbar): ### more x-space for colorbar to fit
+        if(justContours):
+            figsizex = 4.8
+        elif(colourbar): ### more x-space for colorbar to fit
             figsizex+=1.15
         fig = plt.figure(figsize = (figsizex,4.8))
-        ax = fig.add_subplot(111)
+        if(justContours):
+            ax = fig.add_axes([0, 0, 1, 1])
+        else:
+            ax = fig.add_subplot(111)
+            
+            
+        if(makingImg):
+            levels = np.linspace(np.percentile(lvls, 10), np.percentile(lvls, 99),  15)
+            fig, ax = plt.subplots(figsize=(7.2, 7.2))
+            ax.contour(np.sin(pi/180*self.FFtheta_sphere)*np.cos(pi/180*self.FFphi_sphere), np.sin(pi/180*self.FFtheta_sphere)*np.sin(pi/180*self.FFphi_sphere), lvls, levels=levels, linewidths=0.85)
+            ax.set_aspect("equal")
+            plt.axis('off')
+            plt.tight_layout()
+            plt.savefig('C:/Users/al8032pa/Work Folders/Downloads/contours2.pdf', bbox_inches='tight', pad_inches=0, transparent=True)
+            plt.show()
+            exit()
+        
         cnt = plt.contourf(np.sin(pi/180*self.FFtheta_sphere)*np.cos(pi/180*self.FFphi_sphere), np.sin(pi/180*self.FFtheta_sphere)*np.sin(pi/180*self.FFphi_sphere), lvls, levels=levels, extend='both', alpha=1, cmap='turbo') ## top options: 'turbo', 'tab20c', 'nipy_spectral'
         ## plotting it twice makes the contour borderlines harder to see - also takes double filesize
         cnt.set_edgecolor("face") ## so the contour borderlines cannot be seen (they will be seen until saved as .pdf, for some reason...)
@@ -455,10 +472,11 @@ class SNFData():
         
         circRadius = 0.065
         circThickness = 1.2
-        circ = plt.Circle((np.sin(pi/180*24)*np.cos(pi/180*90), np.sin(pi/180*24)*np.sin(pi/180*90)), radius=circRadius, fill=False, color='white', linewidth=circThickness) ## circle to show the 24-degree mark in the V-plane
-        plt.gca().add_artist(circ)
-        circ2 = plt.Circle((np.sin(pi/180*24)*np.cos(pi/180*90), np.sin(pi/180*24)*np.sin(pi/180*270)), radius=circRadius, fill=False, color='white', linewidth=circThickness) ## circle to show the -24-degree mark in the V-plane
-        plt.gca().add_artist(circ2)
+        if(not justContours):
+            circ = plt.Circle((np.sin(pi/180*24)*np.cos(pi/180*90), np.sin(pi/180*24)*np.sin(pi/180*90)), radius=circRadius, fill=False, color='white', linewidth=circThickness) ## circle to show the 24-degree mark in the V-plane
+            plt.gca().add_artist(circ)
+            circ2 = plt.Circle((np.sin(pi/180*24)*np.cos(pi/180*90), np.sin(pi/180*24)*np.sin(pi/180*270)), radius=circRadius, fill=False, color='white', linewidth=circThickness) ## circle to show the -24-degree mark in the V-plane
+            plt.gca().add_artist(circ2)
         
         #=======================================================================
         # circ = plt.Circle((np.sin(pi/180*24)*np.cos(pi/180*90), np.sin(pi/180*56.7)*np.sin(pi/180*90)), radius=circRadius, fill=False, color='white', linewidth=circThickness) ## circle to show the 56.7-degree mark in the V-plane
@@ -468,15 +486,20 @@ class SNFData():
         #=======================================================================
         
         v = np.linspace(levels.min(), levels.max(), 9, endpoint=True)
-        if(colourbar):
+        if(colourbar and not justContours):
             plt.colorbar(ticks=v) 
             #plt.colorbar(cnt, ax=[ax], ticks=v, location='left') # an attempt to get the colorbar to the left side - not compatible with tight layout, and makes it difficult to size with the other plots
-        #plt.xlabel('Horizontal')
-        #plt.ylabel('Vertical')
-        plt.title(f'{self.name} Far-field'+titleAdd, fontsize=20)
-        plt.axis('square')
-        #plt.axis('off') ## removes labels, border, and ticks
-        plt.tick_params(top=False, bottom=False, left=False, right=False, labelleft=False, labelbottom=False)
+        
+        if(justContours):
+            ax.set_aspect("equal")
+            plt.axis('off') ## removes labels, border, and ticks
+            plt.savefig('C:/Users/al8032pa/Work Folders/Downloads/contours.pdf', bbox_inches='tight', pad_inches=0, transparent=True)
+        else:
+            plt.xlabel('Horizontal')
+            plt.ylabel('Vertical')
+            plt.title(f'{self.name} Far-field'+titleAdd, fontsize=20)
+            plt.axis('square')
+            plt.tick_params(top=False, bottom=False, left=False, right=False, labelleft=False, labelbottom=False)
         plt.tight_layout()
         
         ## also plot some planes - 2 theta cuts at phi angles
@@ -1661,7 +1684,7 @@ if __name__ == '__main__':
 startTime = timer()
 print('Start:')
 
-freq_index = 1 ## 0 for 9.25 GHz, 1 for 9.35
+freq_index = 0 ## 0 for 9.25 GHz, 1 for 9.35
 
 #plt.rcParams.update({'font.size': 22})
 #plt.rc('font', size=22)          # controls default text sizes
@@ -2394,48 +2417,86 @@ slotArrayGravDroop = (1.03, .17)
 # slotUncloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Uncloaked', phiAdjustPlotting=0, phiRots=phiRots)
 # #slotUncloakedsb24deg.plot(pol=1, phase=0)
 # #plt.show()
-# #slotUncloakedsb24deg.calcTsmnNoProbeCorrection()
+# #slotUncloakedsb24deg.calcTsmnNoProbeCorrection(calcNew=True)
 # slotUncloakedsb24deg.calcTsmn(freq=freq_index, calcNew=True)
 # #slotUncloakedsb24deg.plotFarField(colourbar=False, freq=freq_index, normToBareSlot=True)
 # #slotUncloakedsb24deg.plotFarFieldPixelstyle()
 # #plt.show()
-#              
-#              
-# #files = ['2025b/9.35GHzSlot+24degreeCloakedsPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsPol90.csv']
-# #files = ['2025b/9.35GHzSlot+24degreeCloakedstry2Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2phi150.4+Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2Pol90.csv']
-# files = ['2025b/9.35GHzSlot+24degreeCloakedsRegluedPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsRegluedPol90.csv']
-# phiRots = [0, -1.6] ## pol0, pol90
-# slotCloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Cloaked', phiAdjustPlotting=0, phiRots=phiRots)
-# #slotCloakedsb24deg.plot(pol=1, phase=0)
-# #plt.show()
-# #slotCloakedsb24deg.calcTsmnNoProbeCorrection()
-# slotCloakedsb24deg.calcTsmn(freq=freq_index, calcNew=True)
-# #slotCloakedsb24deg.plotFarField(colourbar=False, freq=freq_index, normToBareSlot=True)
-# #slotCloakedsb24deg.plotFarFieldPixelstyle()
-# #plt.show()
-#        
-# files = ['2025b/9.35GHzSlotArraynewmeas2Pol0try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol0try2.210.4+.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.175.2+.csv']
-# #files = ['2025b/9.35GHzSlotBareYetAgainPol0.csv', '2025b/9.35GHzSlotBareYetAgainPol90.csv', '2025b/9.35GHzSlotBareYetAgain140+Pol90.csv']
-# phiRots = [1.6, 0.8] ## pol0, pol90
-# slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
-# #slotBareb.plot(pol=1, phase=0)
-# #plt.show()
-# #slotBareb.calcTsmnNoProbeCorrection()
-# #plotQs(slotBareb.Ts)
-# slotBareb.calcTsmn(freq=freq_index, calcNew=True)
-# #slotBareb.calcTsmnNoProbeCorrection(freq=freq_index, calcNew=True)
-# #plotQs(slotBareb.Ts)
-# #slotBareb.plotFarField(colourbar=True, freq=freq_index, normToBareSlot=True)
-# #slotBareb.plotFarFieldPixelstyle(colourbar=True)
-# #plt.show()
-#        
-#  
-# plotFarFieldDiff(slotBareb, slotUncloakedsb24deg, pol=2)
-# plotFarFieldDiff(slotBareb, slotCloakedsb24deg, pol=2)
 #===============================================================================
+              
+              
+#files = ['2025b/9.35GHzSlot+24degreeCloakedsPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsPol90.csv']
+#files = ['2025b/9.35GHzSlot+24degreeCloakedstry2Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2phi150.4+Pol0.csv', '2025b/9.35GHzSlot+24degreeCloakedstry2Pol90.csv']
+files = ['2025b/9.35GHzSlot+24degreeCloakedsRegluedPol0.csv', '2025b/9.35GHzSlot+24degreeCloakedsRegluedPol90.csv']
+phiRots = [0, -1.6] ## pol0, pol90
+slotCloakedsb24deg = SNFData(J, measDist, folder, files, name = 'with Cloaked', phiAdjustPlotting=0, phiRots=phiRots)
+#slotCloakedsb24deg.plot(pol=1, phase=0)
+#plt.show()
+#slotCloakedsb24deg.calcTsmnNoProbeCorrection(calcNew=True)
+slotCloakedsb24deg.calcTsmn(freq=freq_index, calcNew=True)
+
+
+
+
+
+Ts = slotCloakedsb24deg.Ts*0
+# theta, phi, weight
+sources = [
+    (np.pi/2, -np.pi/2, 1.2),   # bottom
+    (np.pi/2,  np.pi/4, 0.5),   # upper-right
+    (np.pi/2, 3*np.pi/4, 0.5),  # upper-left
+]
+
+for j in range(J):
+    s, m, n = SNFAMFunctions.smnFromj(j)
+
+    #===========================================================================
+    # for theta0, phi0, weight in sources:
+    #     th = np.array([theta0])
+    #     ph = np.array([phi0])
+    #     K = np.asarray(SNFAMFunctions.Ksmn(s, m, n, th, ph))
+    #     Ktheta = np.ravel(K[0])[0]
+    #     Ts[j] += weight * np.conj(Ktheta)
+    #===========================================================================
+    
+    amp = n * (n + 1)
+    if s == 1:
+        Ts[j] = amp * np.real((1j)**m) #(-1)**(abs(m)//2)
+    else:
+        Ts[j] = amp
+
+
+        
+slotCloakedsb24deg.Ts = Ts  
+        
+        
+        
+print(slotCloakedsb24deg.Ts, slotCloakedsb24deg.Ts.shape)
+slotCloakedsb24deg.plotFarField(colourbar=False, freq=freq_index, justContours=True, pol=2, normalize=True, spacing = .2, makingImg=True)
+#slotCloakedsb24deg.plotFarField(colourbar=False, freq=freq_index, normToBareSlot=True)
+#slotCloakedsb24deg.plotFarFieldPixelstyle()
+plt.show()
+        
+files = ['2025b/9.35GHzSlotArraynewmeas2Pol0try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol0try2.210.4+.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.csv', '2025b/9.35GHzSlotArraynewmeas2Pol90try2.175.2+.csv']
+#files = ['2025b/9.35GHzSlotBareYetAgainPol0.csv', '2025b/9.35GHzSlotBareYetAgainPol90.csv', '2025b/9.35GHzSlotBareYetAgain140+Pol90.csv']
+phiRots = [1.6, 0.8] ## pol0, pol90
+slotBareb = SNFData(J, measDist, folder, files, name = 'Bare Slot Array', phiAdjustPlotting=0, phiRots=phiRots)
+#slotBareb.plot(pol=1, phase=0)
+#plt.show()
+#slotBareb.calcTsmnNoProbeCorrection(calcNew=True)
+#plotQs(slotBareb.Ts)
+slotBareb.calcTsmn(freq=freq_index, calcNew=True)
+#slotBareb.calcTsmnNoProbeCorrection(freq=freq_index, calcNew=True)
+#plotQs(slotBareb.Ts)
+#slotBareb.plotFarField(colourbar=True, freq=freq_index, normToBareSlot=True)
+#slotBareb.plotFarFieldPixelstyle(colourbar=True)
+#plt.show()
+        
+
+#plotFarFieldDiff(slotBareb, slotUncloakedsb24deg, pol=2)
+#plotFarFieldDiff(slotBareb, slotCloakedsb24deg, pol=2)
        
-#plotVsSlotPlanes([slotBareb], alsoRef = True, alsoNF = False, normToBareSlot=True, plotCrossPol=True, addErrStuff='Runs3', alsoCPerr=True)
-       
+#plotVsSlotPlanes([slotBareb], alsoRef = True, alsoNF = False, normToBareSlot=True, plotCrossPol=True, addErrStuff='Runs3', alsoCPerr=True)      
 #plotVsSlotPlanes([slotBareb, slotCloakedsb24deg, slotUncloakedsb24deg], alsoRef = False, alsoNF = False, freq=freq_index, normToBareSlot=True, plotCrossPol=True, addErrStuff='Runs3')
 
 
